@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
 import json
 import os
 import sys
@@ -1142,6 +1143,29 @@ def cmd_image_upload(args: argparse.Namespace) -> None:
 # Command: video-upload
 # ---------------------------------------------------------------------------
 
+def _wait_video_ready(video_id: str, timeout: int = 300, interval: int = 6) -> str:
+    """Poll a video until processing completes. Returns final status string.
+
+    Meta returns a video ID immediately after upload, but the video is still
+    'processing'. Creating a creative that references a not-yet-ready video can
+    fail, so callers that immediately build a creative should wait for 'ready'.
+    """
+    waited = 0
+    status = "unknown"
+    while waited < timeout:
+        data = _api_call("GET", video_id, {"fields": "status"})
+        status = (data.get("status") or {}).get("video_status", "unknown")
+        print(f"  video {video_id} status={status} ({waited}s)", file=sys.stderr)
+        if status == "ready":
+            return status
+        if status == "error":
+            print(f"  VIDEO PROCESSING ERROR: {json.dumps(data.get('status'))}", file=sys.stderr)
+            return status
+        time.sleep(interval)
+        waited += interval
+    return status
+
+
 def cmd_video_upload(args: argparse.Namespace) -> None:
     """Upload video file, returns video ID."""
     account_id = args.account_id or META_AD_ACCOUNT_ID
@@ -1166,10 +1190,19 @@ def cmd_video_upload(args: argparse.Namespace) -> None:
             timeout=300,
         )
 
+    video_id = data.get("id", "")
+    final_status = None
+    if getattr(args, "wait", False) and video_id:
+        final_status = _wait_video_ready(video_id, timeout=args.wait_timeout)
+        if isinstance(data, dict):
+            data["video_status"] = final_status
+
     if args.json:
         _output_json(data)
     else:
-        print(f"Video uploaded: ID {data.get('id', '---')}")
+        print(f"Video uploaded: ID {video_id or '---'}")
+        if final_status is not None:
+            print(f"  Processing status: {final_status}")
 
 
 # ---------------------------------------------------------------------------
@@ -1274,6 +1307,102 @@ def cmd_creative_create(args: argparse.Namespace) -> None:
         _output_json(data)
     else:
         print(f"Creative created: ID {data.get('id')}")
+
+
+# ---------------------------------------------------------------------------
+# Command: creative-clone
+# ---------------------------------------------------------------------------
+
+# Deprecated degrees_of_freedom_spec fields: the API returns them on read but
+# rejects them on create. Strip before recreating.
+_DOF_DEPRECATED = [
+    "standard_enhancements", "advantage_plus_creative", "cv_transformation",
+    "image_animation", "replace_media_text", "show_destination_blurbs", "show_summary",
+]
+
+
+def cmd_creative_clone(args: argparse.Namespace) -> None:
+    """Clone an existing creative, optionally swapping video/image/URL.
+
+    Creative objects are immutable. This reads the source creative's full spec
+    (object_story_spec + asset_feed_spec + degrees_of_freedom_spec), applies the
+    requested swaps while preserving texts, adlabels and asset_customization_rules,
+    creates a NEW creative, and optionally swaps it onto an ad (--swap-on-ad).
+
+    Handles two Advantage+ gotchas automatically:
+      - images[] must have UNIQUE hashes -> when --swap-image is given, all image
+        slots collapse into a single entry carrying every original adlabel.
+      - degrees_of_freedom_spec deprecated fields are stripped before create.
+    """
+    account_id = args.account_id or META_AD_ACCOUNT_ID
+
+    orig = _api_call("GET", args.creative_id, {
+        "fields": "object_story_spec,asset_feed_spec,degrees_of_freedom_spec",
+    })
+    afs = copy.deepcopy(orig.get("asset_feed_spec") or {})
+    if not afs:
+        print("ERROR: Source creative has no asset_feed_spec (not an Advantage+ creative). "
+              "Use creative-create for simple creatives.", file=sys.stderr)
+        sys.exit(1)
+
+    # swap video(s)
+    if args.swap_video:
+        for v in afs.get("videos", []):
+            v["video_id"] = args.swap_video
+            if args.swap_thumbnail:
+                v["thumbnail_hash"] = args.swap_thumbnail
+                v.pop("thumbnail_url", None)
+
+    # swap fallback image(s) -> collapse to one unique entry with all adlabels
+    if args.swap_image:
+        imgs = afs.get("images", [])
+        if imgs:
+            all_labels: list = []
+            for img in imgs:
+                all_labels.extend(img.get("adlabels", []))
+            afs["images"] = [{"adlabels": all_labels, "hash": args.swap_image}]
+        else:
+            afs["images"] = [{"hash": args.swap_image}]
+
+    # swap landing page URL(s)
+    if args.new_url:
+        for u in afs.get("link_urls", []):
+            u["website_url"] = args.new_url
+
+    # drop read-only/false response fields the API rejects on create
+    for rk in ("reasons_to_shop", "shops_bundle"):
+        if rk in afs and not afs[rk]:
+            afs.pop(rk, None)
+
+    dof = copy.deepcopy(orig.get("degrees_of_freedom_spec") or {})
+    if dof:
+        cfs = dof.get("creative_features_spec", {})
+        for d in _DOF_DEPRECATED:
+            cfs.pop(d, None)
+
+    payload = {
+        "name": args.name,
+        "object_story_spec": json.dumps(orig.get("object_story_spec") or {}),
+        "asset_feed_spec": json.dumps(afs),
+    }
+    if dof:
+        payload["degrees_of_freedom_spec"] = json.dumps(dof)
+
+    new_creative = _api_call("POST", f"{account_id}/adcreatives", payload)
+    new_id = new_creative.get("id")
+
+    result = {"new_creative_id": new_id}
+    if args.swap_on_ad and new_id:
+        swap = _api_call("POST", args.swap_on_ad, {"creative": json.dumps({"creative_id": new_id})})
+        result["ad_swap"] = swap
+        result["ad_id"] = args.swap_on_ad
+
+    if args.json:
+        _output_json(result)
+    else:
+        print(f"New creative: {new_id}")
+        if args.swap_on_ad:
+            print(f"Swapped onto ad {args.swap_on_ad}: {result.get('ad_swap')}")
 
 
 # ---------------------------------------------------------------------------
@@ -1672,6 +1801,8 @@ def main() -> None:
     p = subparsers.add_parser("video-upload", help="Upload video, returns ID")
     p.add_argument("--file", required=True, help="Path to video file")
     p.add_argument("--title", help="Video title")
+    p.add_argument("--wait", action="store_true", help="Poll until video processing is 'ready' (needed before using in a creative)")
+    p.add_argument("--wait-timeout", type=int, default=300, help="Max seconds to wait when --wait (default 300)")
     p.add_argument("--json", action="store_true")
 
     # -- creative-create --
@@ -1690,6 +1821,17 @@ def main() -> None:
     p.add_argument("--call-to-action", help="CTA type (LEARN_MORE, SHOP_NOW, SIGN_UP, ...)")
     p.add_argument("--child-attachments", help="JSON array for carousel")
     p.add_argument("--url-tags", help="UTM parameters")
+    p.add_argument("--json", action="store_true")
+
+    # -- creative-clone --
+    p = subparsers.add_parser("creative-clone", help="Clone a creative, optionally swapping video/image/URL (Advantage+ asset_feed_spec)")
+    p.add_argument("--creative-id", required=True, help="Source creative ID to clone")
+    p.add_argument("--name", required=True, help="Name for the new creative")
+    p.add_argument("--swap-video", help="New video ID (replaces video in videos[])")
+    p.add_argument("--swap-thumbnail", help="New video thumbnail image hash (used with --swap-video)")
+    p.add_argument("--swap-image", help="New fallback image hash (collapses images[] to one unique entry)")
+    p.add_argument("--new-url", help="New landing page URL (replaces website_url in link_urls[])")
+    p.add_argument("--swap-on-ad", help="Ad ID to immediately point at the new creative (triggers re-review)")
     p.add_argument("--json", action="store_true")
 
     # -- campaigns --
@@ -1803,6 +1945,7 @@ def main() -> None:
         "image-upload": cmd_image_upload,
         "video-upload": cmd_video_upload,
         "creative-create": cmd_creative_create,
+        "creative-clone": cmd_creative_clone,
         "creatives": cmd_creatives,
         "creative-detail": cmd_creative_detail,
         "insights": cmd_insights,

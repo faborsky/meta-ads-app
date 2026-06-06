@@ -64,10 +64,22 @@ source <APP_DIR>/venv/bin/activate && python <APP_DIR>/meta_ads_cli.py <command>
 | Command | Key Flags |
 |---------|-----------|
 | `image-upload` | `--file`, `--json` |
-| `video-upload` | `--file`, `--title`, `--json` |
+| `video-upload` | `--file`, `--title`, `--wait`, `--wait-timeout`, `--json` |
 | `creative-create` | `--name`, `--type link/video/photo/carousel`, `--page-id`, `--message`, `--link`, `--headline`, `--image-hash`, `--video-id`, `--call-to-action`, `--json` |
+| `creative-clone` | `--creative-id` (source), `--name`, `--swap-video`, `--swap-thumbnail`, `--swap-image`, `--new-url`, `--swap-on-ad`, `--json` |
 | `creatives` | `--limit`, `--json` |
 | `creative-detail` | `--creative-id`, `--json` |
+
+**`video-upload --wait`**: Upload returns the video ID immediately, but the video is still `processing`. Building a creative that references a not-yet-`ready` video can fail. Use `--wait` to poll until ready before creating a creative.
+
+**`creative-clone`**: Clones an existing Advantage+ creative (immutable) into a new one, swapping media/URL while preserving texts, adlabels and `asset_customization_rules`. Handles the duplicate-image-hash and deprecated-`degrees_of_freedom_spec` gotchas automatically. Add `--swap-on-ad <AD_ID>` to point an ad at the new creative in one call (triggers re-review). Example — replace the video on a large-scale ad:
+```bash
+VID=$(python meta_ads_cli.py video-upload --file new.mp4 --wait --json | jq -r .id)
+HASH=$(python meta_ads_cli.py image-upload --file thumb.jpg --json | jq -r .hash)
+python meta_ads_cli.py creative-clone --creative-id <OLD_CREATIVE> --name "Video V2" \
+  --swap-video "$VID" --swap-thumbnail "$HASH" --swap-image "$HASH" \
+  --new-url "https://example.com/lp" --swap-on-ad <AD_ID>
+```
 
 ### Insights
 | Command | Key Flags |
@@ -86,7 +98,9 @@ source <APP_DIR>/venv/bin/activate && python <APP_DIR>/meta_ads_cli.py <command>
 
 - **Creatives are immutable**: Creative objects (`/adcreatives`) cannot be modified after creation. To "edit" text/images, create a NEW creative and swap it on the ad via `POST /{ad-id}` with `creative={"creative_id":"<NEW_ID>"}`. The ad goes through re-review (same as UI edit).
 - **asset_feed_spec**: Advantage+ / Dynamic Creative ads use `asset_feed_spec` with multiple bodies/titles/descriptions/images/videos + `asset_customization_rules` (placement targeting) + `adlabels` (linking assets to rules). When recreating, preserve ALL adlabels, customization rules, and `degrees_of_freedom_spec`.
-- **degrees_of_freedom_spec cleanup**: When reading an existing creative, the API returns deprecated fields (`standard_enhancements`, `advantage_plus_creative`, `cv_transformation`, `image_animation`, `replace_media_text`, `show_destination_blurbs`, `show_summary`). These MUST be removed before creating a new creative, or the API rejects the request.
+- **degrees_of_freedom_spec cleanup**: When reading an existing creative, the API returns deprecated fields (`standard_enhancements`, `advantage_plus_creative`, `cv_transformation`, `image_animation`, `replace_media_text`, `show_destination_blurbs`, `show_summary`). These MUST be removed before creating a new creative, or the API rejects the request. (`creative-clone` does this automatically.)
+- **Unique image hashes in asset_feed_spec**: Every entry in `images[]` must have a UNIQUE `hash`. Putting the same hash in two slots fails with `error_subcode 1815629` "Duplicates of ad asset values are not allowed". When you only have one new image but two image slots, collapse them into ONE entry carrying all the original `adlabels` (so `asset_customization_rules` still resolve). A video's `thumbnail_hash` MAY equal an image hash — the uniqueness constraint is within `images[]` only. (`creative-clone --swap-image` handles this.)
+- **Read-only response fields**: `asset_feed_spec` read returns `reasons_to_shop` / `shops_bundle` as `false` — strip falsy values before re-creating, or the API may reject them.
 - **CLI vs direct API**: The `creative-create` CLI command creates simple creatives (single image/video/carousel). For Advantage+ creatives with `asset_feed_spec`, use direct API calls via Python script importing `meta_ads_cli._api_call()`.
 - **Budget in cents**: API uses cents, CLI handles conversion automatically
 - **Cursor pagination**: Meta uses cursor-based pagination (not offset). The CLI handles this transparently
