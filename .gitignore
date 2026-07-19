@@ -1,5 +1,8 @@
 .env
+.env.bak
 venv/
+.venv/
 __pycache__/
 *.pyc
+.usage/
 .DS_Store
