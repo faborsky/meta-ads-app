@@ -1,6 +1,6 @@
 # Meta Ads App — CLI for the Meta Marketing API
 
-Python CLI for Facebook & Instagram ads via Marketing API **v25.0**. Version 2.0.0, 47 commands. Czech user docs in [README.md](README.md).
+Python CLI for Facebook & Instagram ads via Marketing API **v25.0**. Version 2.1.0, 47 commands. Czech user docs in [README.md](README.md).
 
 ## Setup
 
@@ -57,7 +57,7 @@ Full flags: README.md command tables, or `--help` per command.
 
 ## Release checklist
 
-Bump `__version__` in `metaads/__init__.py` → update README (version line, 🆕 section, command tables), CLAUDE.md (command count/index), CHANGELOG.md (new `## [x.y.z] — YYYY-MM-DD` entry), bundled skill → run `python scripts/check_docs_consistency.py` (must pass) → commit → tag `vX.Y.Z`. (GitHub Release až po zveřejnění repa.)
+Bump `__version__` in `metaads/__init__.py` → update README (version line, 🆕 section, command tables), CLAUDE.md (command count/index), CHANGELOG.md (new `## [x.y.z] — YYYY-MM-DD` entry), bundled skill → run `python scripts/check_docs_consistency.py` (must pass) → commit → tag `vX.Y.Z`. (GitHub Release až po zveřejnění repa. Při zveřejnění přidat **MIT LICENSE** + sekci „Licence" do README — vzor og-refresh-app.)
 
 ## Documentation map
 

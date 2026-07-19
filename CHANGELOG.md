@@ -2,6 +2,10 @@
 
 Všechny podstatné změny v tomto projektu. Formát vychází z [Keep a Changelog](https://keepachangelog.com/), verzování je [SemVer](https://semver.org/) (verze žije v `metaads/__init__.py`).
 
+## [2.1.0] — 2026-07-19 — Vizuální podpis 🎨
+
+- **ASCII banner s barvami** („META" v modré + verze, tagline a „by Jindřich Fáborský · AIFirst.cz") — vypíše se **jen člověku v terminálu** (stdout je TTY a neběží `--json`). Pipe, skripty a agentní tool-cally dostávají dál čistý výstup bez jediného znaku navíc. Respektuje `NO_COLOR`. Přidán `--version` flag.
+
 ## [2.0.0] — 2026-07-19 — Velký refresh: 47 příkazů, dry-run všech zápisů, pulse 🚀
 
 **Breaking change:** všechny zápisové příkazy (create/update/duplicate/delete) nově běží defaultně jako **dry-run** — kampaně/sady/reklamy/kreativy se validují přes `execution_options=["validate_only"]`, ale nic se nezapíše. Reálný zápis vyžaduje `--confirm`. Výjimka: `image-upload`/`video-upload` nahrávají rovnou (plní jen knihovnu médií, nic nejde live).

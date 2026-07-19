@@ -5,9 +5,11 @@ parity by construction."""
 from __future__ import annotations
 
 import argparse
+import os
 import signal
+import sys
 
-from metaads import api
+from metaads import __version__, api
 from metaads.commands.account import cmd_account, cmd_api_limits, cmd_pages
 from metaads.commands.activity import CATEGORIES, cmd_activities
 from metaads.commands.ads import (
@@ -69,6 +71,43 @@ UPDATE_STATUS_CHOICES = ["ACTIVE", "PAUSED", "ARCHIVED"]
 COPY_STATUS_CHOICES = ["ACTIVE", "PAUSED", "INHERITED_FROM_SOURCE"]
 
 
+# ---------------------------------------------------------------------------
+# Visual signature — humans only. Printed ONLY when stdout is a TTY and the
+# run isn't --json, so pipes, scripts and agent tool-calls always get clean,
+# token-free output.
+# ---------------------------------------------------------------------------
+
+_ART = [
+    "███╗   ███╗ ███████╗ ████████╗  █████╗ ",
+    "████╗ ████║ ██╔════╝ ╚══██╔══╝ ██╔══██╗",
+    "██╔████╔██║ █████╗      ██║    ███████║",
+    "██║╚██╔╝██║ ██╔══╝      ██║    ██╔══██║",
+    "██║ ╚═╝ ██║ ███████╗    ██║    ██║  ██║",
+    "╚═╝     ╚═╝ ╚══════╝    ╚═╝    ╚═╝  ╚═╝",
+]
+
+
+def _print_banner() -> None:
+    if not sys.stdout.isatty() or "--json" in sys.argv:
+        return
+    use_color = "NO_COLOR" not in os.environ
+    blue = "\033[38;5;33m" if use_color else ""   # Meta blue
+    dim = "\033[2m" if use_color else ""
+    bold = "\033[1m" if use_color else ""
+    reset = "\033[0m" if use_color else ""
+    info = [
+        "",
+        f"{bold}Meta Ads CLI{reset} v{__version__}",
+        f"{dim}Facebook & Instagram kampaně — insights · kreativy · dry-run zápisy{reset}",
+        f"{dim}./run.sh <příkaz> --help{reset}",
+        f"{dim}by Jindřich Fáborský · AIFirst.cz{reset}",
+        "",
+    ]
+    for art_line, info_line in zip(_ART, info):
+        print(f"{blue}{art_line}{reset}   {info_line}")
+    print()
+
+
 def _cmd(sub, name: str, func, help_: str, *, write: bool = False):
     """Add a subcommand; writes get --confirm (default = dry-run/validate)."""
     sp = sub.add_parser(name, help=help_ + (" [write]" if write else ""))
@@ -106,6 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Meta Ads CLI — manage Facebook & Instagram ad campaigns "
                     "(writes default to dry-run; add --confirm to execute).",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--account-id", default=None,
                         help="Override ad account ID (default: META_AD_ACCOUNT_ID from .env)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -409,6 +449,7 @@ def main() -> None:
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
+    _print_banner()
     api.check_config()
     parser = build_parser()
     args = parser.parse_args()
