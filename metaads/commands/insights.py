@@ -23,30 +23,36 @@ DATE_PRESETS = [
     "maximum",
 ]
 
+# 7d_view/28d_view were removed by Meta on 2026-01-12 — the API silently
+# returns zeros for them, so the CLI refuses them instead.
 ATTRIBUTION_WINDOWS = [
-    "1d_click", "7d_click", "28d_click", "1d_view", "7d_view", "28d_view",
-    "1d_ev", "dda", "default",
+    "1d_click", "7d_click", "28d_click", "1d_view", "1d_ev", "dda", "default",
 ]
+_REMOVED_WINDOWS = {"7d_view", "28d_view"}
 
 
 def _format_insight_value(key: str, value: object) -> str:
-    """Format insight metric value for human display."""
+    """Format insight metric value for human display (never crash on API shape)."""
     if value is None:
         return "---"
-    if key in ("ctr", "frequency"):
-        return f"{float(value):.2f}"
-    if key in ("cpc", "cpm", "spend"):
-        return f"{float(value):.2f}"
-    if key in ("impressions", "reach", "clicks"):
-        return f"{int(value):,}"
-    if key in ("actions", "cost_per_action_type") and isinstance(value, list):
-        parts = []
-        for a in value:
-            val = a.get("value", "?")
-            if key == "cost_per_action_type":
-                val = f"{float(val):.2f}"
-            parts.append(f"{a.get('action_type', '?')}: {val}")
-        return "; ".join(parts)
+    try:
+        if key in ("ctr", "frequency", "cpc", "cpm", "spend"):
+            return f"{float(value):.2f}"
+        if key in ("impressions", "reach", "clicks"):
+            return f"{int(value):,}"
+        if key in ("actions", "cost_per_action_type") and isinstance(value, list):
+            parts = []
+            for a in value:
+                val = a.get("value", "?")
+                if key == "cost_per_action_type":
+                    try:
+                        val = f"{float(val):.2f}"
+                    except (TypeError, ValueError):
+                        pass
+                parts.append(f"{a.get('action_type', '?')}: {val}")
+            return "; ".join(parts)
+    except (TypeError, ValueError):
+        pass
     return str(value)
 
 
@@ -73,6 +79,9 @@ def build_insight_params(args) -> dict:
     if getattr(args, "attribution_windows", None):
         windows = [w.strip() for w in args.attribution_windows.split(",")]
         for w in windows:
+            if w in _REMOVED_WINDOWS:
+                _die(f"ERROR: attribution window '{w}' was removed by Meta (2026-01-12) — "
+                     f"the API returns silent zeros for it. Valid: {', '.join(ATTRIBUTION_WINDOWS)}")
             if w not in ATTRIBUTION_WINDOWS:
                 _die(f"ERROR: unknown attribution window '{w}' (valid: {', '.join(ATTRIBUTION_WINDOWS)})")
         params["action_attribution_windows"] = json.dumps(windows)

@@ -2,6 +2,39 @@
 
 Všechny podstatné změny v tomto projektu. Formát vychází z [Keep a Changelog](https://keepachangelog.com/), verzování je [SemVer](https://semver.org/) (verze žije v `metaads/__init__.py`).
 
+## [2.2.0] — 2026-08-13 — Bezpečnostní hardening před zveřejněním 🛡️
+
+Zapracování kompletního bezpečnostního a API auditu před otevřením repa veřejnosti a studentům AI First.
+
+### Bezpečnost
+- **Token cestuje v `Authorization: Bearer` hlavičce** místo query parametru — nedostane se do URL, proxy logů ani textu výjimek. Chybové hlášky navíc **redigují tajemství** (`access_token`, `client_secret`, `fb_exchange_token`, `input_token` → `REDACTED`), takže výpadek Wi-Fi nevypíše živý token do terminálu.
+- `token-extend` posílá `client_secret` v **POST těle** (dřív GET query string).
+- `.env` se při `--write-env` přepisuje **atomicky** (temp + rename) a `.env`/`.env.bak` dostávají práva **600**; `setup.sh` nastavuje 600 při založení.
+- `.usage/token.json` ukládá **hash tokenu** místo jeho posledních 12 znaků; JSON stavové soubory se zapisují atomicky.
+- `_api_call` odmítne následovat URL mimo `graph.facebook.com` a nemodifikuje volajícímu předaný dict.
+
+### Ochrana účtu
+- **Oprava obejití rate-limit guardu**: víc BUC záznamů v jedné hlavičce (ads_management + ads_insights) se nově vyhodnocuje přes `max()` — chladnější záznam už nepřepíše horký a neodzbrojí hard-stop.
+- Guard blokuje **per účet** (horký účet A neblokuje práci na účtu B) a `api-limits` jím projde vždy (je to diagnostický nástroj).
+- **Transient chyby se u zápisů (POST) neopakují** — Meta občas hlásí `is_transient` až PO provedeném zápisu a retry by založil kampaň dvakrát. CLI řekne, že zápis mohl projít, a poradí kontrolu list příkazem. Čtení se retryují dál.
+- Čekání odvozené z `estimated_time_to_regain_access` má strop 5 minut — CLI nebude tiše spát hodinu.
+- Denní kontrola expirace tokenu je **nefatální**: její selhání (captive portál, offline, permission chyba na `debug_token`) už nikdy neshodí samotný příkaz; neúspěch se cachuje s 1h back-offem.
+
+### Aktualizace na stav API (srpen 2026)
+- Atribuční okna **`7d_view`/`28d_view` Meta odstranila 2026-01-12** (API vrací tiché nuly) — CLI je odmítá s vysvětlením; `1d_ev` (engaged view) je validní.
+- **Ochrana měn bez haléřů** (JPY, HUF, IDR, …): CLI odmítne nastavovat rozpočty tam, kde by převod ×100 nastavil 100× vyšší částku (měna účtu se cachuje v `.usage/accounts.json`).
+- `docs/api-notes.md`: v26.0 vyšla 2026-07-29 (v25 sunset TBD, auto-upgrade mechanismus), přejmenování tierů na Limited/Full access, retention limity insights (37/13/6 měsíců).
+
+### UX pro nováčky
+- `--help` a `--version` fungují **i před vyplněním `.env`**.
+- Nevalidní JSON ve flazích (`--targeting`, `--special-ad-categories`, `--child-attachments`) a `--genders male` dávají čistou chybovou hlášku místo Python tracebacku.
+- `*-delete --json` vrací **validní JSON i v dry-runu** (dřív lidský text); výsledky delete nesou `executed` klíč.
+- README: HTTPS clone URL, sekce pro **Windows** (Git Bash/WSL/PowerShell), kompletní walkthrough od **registrace Meta developera** po 60denní token, sekce Licence a Chyby a náměty.
+
+### Nové
+- **MIT LICENSE**.
+- **Testovací suite** `tests/` (45 testů, pytest, kompletně offline) — pokrývá redakci tokenů, guard, retry politiku, dry-run mutací, JSON kontrakty a atomický zápis `.env`. Dev závislosti: `requirements-dev.txt`.
+
 ## [2.1.0] — 2026-07-19 — Vizuální podpis 🎨
 
 - **ASCII banner s barvami** („META" v modré + verze, tagline a „by Jindřich Fáborský · AIFirst.cz") — vypíše se **jen člověku v terminálu** (stdout je TTY a neběží `--json`). Pipe, skripty a agentní tool-cally dostávají dál čistý výstup bez jediného znaku navíc. Respektuje `NO_COLOR`. Přidán `--version` flag.

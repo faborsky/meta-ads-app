@@ -35,7 +35,7 @@ Command reference: `<META_APP_DIR>/README.md` (full flag tables) and `<META_APP_
 1. **Dry-run first.** Every write command validates by default; run it WITHOUT `--confirm` first, show the result, then execute with `--confirm` only after the user approves the plan.
 2. **Never change a live campaign without explicit user approval** — budgets, statuses, targeting, creatives. Present a diff/plan and wait.
 3. **Everything starts PAUSED.** Never activate (`--status ACTIVE`) on your own.
-4. **DELETE is permanent.** Prefer ARCHIVED. The CLI refuses to delete non-PAUSED entities — do not reach for `--force` without the user asking.
+4. **DELETE is permanent.** Prefer ARCHIVED. The CLI refuses to delete non-PAUSED campaigns/adsets/ads — do not reach for `--force` without the user asking. (`creative-delete` has no status brake — creatives have no PAUSED state; Meta refuses to delete an in-use creative.)
 5. **Currency awareness.** Amounts are in the ACCOUNT currency, which may not be the user's home currency — check `account` first and label every money number with its currency.
 6. **Review is asynchronous.** After creating/swapping creatives, check `ad-review` (typically <24 h). A creative swap always triggers re-review.
 7. **Respect rate limits.** No parallel API fan-outs; the CLI throttles and hard-stops itself — if it does, wait, don't override.

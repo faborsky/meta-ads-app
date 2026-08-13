@@ -1,16 +1,17 @@
 # Meta Ads App
 
-**Verze 2.1.0** · Python CLI pro správu Meta Ads (Facebook & Instagram) přes Marketing API v25.0 — stavěné pro orchestraci AI agentem (Claude Code) i pro vlastní automatizace.
+**Verze 2.2.0** · Python CLI pro správu Meta Ads (Facebook & Instagram) přes Marketing API v25.0 — stavěné pro orchestraci AI agentem (Claude Code) i pro vlastní automatizace.
 
 Appka vznikla jako součást ekosystému kurzu [AI First](https://aifirst.cz) — praktická ukázka, jak si marketér může nechat AI postavit a řídit vlastní nástroje. Novinky sleduj přes **Watch → Custom → Releases** na GitHubu, changelog je v [CHANGELOG.md](CHANGELOG.md).
 
-## 🆕 Co je nového (2.0.0)
+## 🆕 Co je nového (2.2.0)
 
-- **Dry-run všech zápisů**: create/update/duplicate/delete se bez `--confirm` jen validují (`validate_only`), nic se nezapíše.
-- **`pulse`** — přehled účtu v ~6 API callech: metriky s deltami vs. předchozí okno, top movery, reklamy v review, API limity, token.
-- **Promoce organiky**: `creative-from-post` (FB), `creative-from-ig` (IG post/Reel), `ig-media`.
-- **`ad-review`** (důvody zamítnutí), **`preview`** (HTML náhled před publikací), **`activities`** (kdo co změnil), **`api-limits`**, targeting search, Advantage+ stav, bid strategie, budget schedules, pixely a custom konverze.
-- Preflight lint textů/obrázků, pojistka proti mazání (jen PAUSED entity), refaktor na balík `metaads/`.
+- **Bezpečnostní vylepšení**: token cestuje v `Authorization` hlavičce (ne v URL), chybové hlášky redigují tajemství, `token-extend` posílá app secret v těle requestu a `.env` zapisuje atomicky s právy 600.
+- **Spolehlivější ochrana účtu**: rate-limit guard správně vyhodnocuje víc BUC záznamů najednou, blokuje per účet (horký účet A neblokuje účet B) a nečeká slepě desítky minut. Zápisy (POST) se při „transient" chybě neopakují — žádné duplicitní kampaně.
+- **Aktualizace na stav API 2026**: atribuční okna `7d_view`/`28d_view` Meta zrušila (API na ně vrací tiché nuly) — CLI je odmítne s vysvětlením; přidáno okno `1d_ev`.
+- **Přívětivější chyby**: `--help`/`--version` fungují i před vyplněním `.env`, nevalidní JSON ve flazích a `--genders male` dají čistou hlášku místo tracebacku, `*-delete --json` vrací validní JSON i v dry-runu.
+- **Ochrana měn bez haléřů** (JPY, HUF, …): CLI odmítne nastavovat rozpočty na účtech, kde by převod ×100 nastavil 100× vyšší částku.
+- **Testy**: `tests/` s pytest suite (45 testů) pokrývající bezpečnostní a ochranné mechanismy.
 
 Kompletní seznam změn: [CHANGELOG.md](CHANGELOG.md).
 
@@ -18,7 +19,7 @@ Kompletní seznam změn: [CHANGELOG.md](CHANGELOG.md).
 
 **A) Orchestrace přes Claude Code (doporučeno)** — appku řídí AI agent, ty zadáváš úkoly česky. Zkopíruj si tento prompt do Claude Code:
 
-> Naklonuj si repo `git@github.com:faborsky/meta-ads-app.git` do `~/dev/meta-ads-app`, spusť `./setup.sh`, nainstaluj skill podle `skill/INSTALL.md` a proveď mě vyplněním `.env` (potřebuju Meta app, token a ad account ID — postup je v README v sekci „Získání přístupů"). Pak ověř funkčnost přes `./run.sh account`.
+> Naklonuj si repo `https://github.com/faborsky/meta-ads-app.git` do `~/dev/meta-ads-app`, spusť `./setup.sh`, nainstaluj skill podle `skill/INSTALL.md` a proveď mě vyplněním `.env` (potřebuju Meta app, token a ad account ID — postup je v README v sekci „Získání přístupů"). Pak ověř funkčnost přes `./run.sh account`.
 
 Skill `/meta-ads` pak umí scénáře create / optimize / review-check / creative refresh se zabudovanými bezpečnostními pravidly (plán → schválení → zápis, PAUSED starty, dry-run).
 
@@ -40,30 +41,52 @@ Skill `/meta-ads` pak umí scénáře create / optimize / review-check / creativ
 ## Instalace
 
 ```bash
-git clone git@github.com:faborsky/meta-ads-app.git
+git clone https://github.com/faborsky/meta-ads-app.git
 cd meta-ads-app
 ./setup.sh          # vytvoří .venv, nainstaluje závislosti, založí .env
 # vyplň .env (viz níže)
 ./run.sh account    # test funkčnosti
 ```
 
+### Windows
+
+Skripty `setup.sh`/`run.sh` jsou bashové — na Windows použij **Git Bash** (součást [Git for Windows](https://git-scm.com/download/win)) nebo **WSL** a postup výše funguje beze změny. Alternativně čistý PowerShell:
+
+```powershell
+git clone https://github.com/faborsky/meta-ads-app.git; cd meta-ads-app
+python -m venv .venv; .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env      # vyplň credentials
+python meta_ads_cli.py account
+```
+
 ## Získání přístupů krok za krokem
 
 Meta používá jiný model než Google OAuth: místo refresh tokenu máš **user access token s platností 60 dní**, který před vypršením vyměňuješ za nový (CLI to umí samo). Poctivé shrnutí: jednou za ~2 měsíce token obnovíš jedním příkazem; když ho necháš propadnout (nebo si změníš heslo na Facebooku), musíš vygenerovat nový ručně.
 
+Dobrá zpráva pro začátek: **pro práci s vlastním reklamním účtem nepotřebuješ žádné schvalování od Mety** (app review). Výchozí přístupová úroveň Marketing API („Limited access", dřív „development") stačí na všechno, co CLI umí — limituje jen počet API callů za hodinu, což pro jednoho člověka bohatě stačí.
+
+### 0) Registrace jako Meta developer (jednorázově)
+
+Pokud jsi na [developers.facebook.com](https://developers.facebook.com) ještě nikdy nic nedělal/a:
+
+1. Přihlas se svým **běžným facebookovým účtem** (tím, který má roli na reklamním účtu — žádný nový účet se nezakládá).
+2. Klikni na **Get Started** (pravý horní roh) a projdi registraci developera: odsouhlasení podmínek, **ověření e-mailu a telefonního čísla**, výběr role (klidně „Other").
+3. Hotovo — účet se tím nijak nemění, jen smí vytvářet aplikace.
+
 ### 1) Meta aplikace
 
-1. [developers.facebook.com](https://developers.facebook.com) → **My Apps → Create App** → typ **Business**.
-2. V aplikaci přidej produkt **Marketing API**.
+1. [developers.facebook.com](https://developers.facebook.com) → **My Apps → Create App** → use case / typ **Business** (název appky je libovolný, např. „Moje Ads CLI"; appka je jen tvoje a nikdo jiný ji neuvidí).
+2. V aplikaci přidej produkt **Marketing API** (Dashboard → Add product).
 3. **App settings → Basic**: zkopíruj **App ID** a **App Secret** → `META_APP_ID`, `META_APP_SECRET`.
-4. Aplikace musí být v **Live mode** (ne Development), jinak nejde vytvářet kreativy generující page posty.
+4. Aplikace musí být v **Live mode** (ne Development), jinak nejde vytvářet kreativy generující page posty. Přepínač je nahoře na dashboardu appky; Live mode může chtít doplnit Privacy Policy URL v Basic settings — pro osobní nástroj stačí odkaz na libovolnou existující stránku s policy.
 
 ### 2) Access token
 
-1. [Graph API Explorer](https://developers.facebook.com/tools/explorer) → vyber svou aplikaci.
-2. **Permissions**: `ads_management`, `ads_read`, `business_management`, `pages_show_list`, `pages_read_engagement`, `instagram_basic` (poslední dvě kvůli promoci organiky a `ig-media`).
+1. [Graph API Explorer](https://developers.facebook.com/tools/explorer) → vpravo v **Meta App** vyber svou aplikaci z kroku 1.
+2. **Permissions** (pole „Add a permission"): `ads_management`, `ads_read`, `business_management`, `pages_show_list`, `pages_read_engagement`, `instagram_basic` (poslední dvě kvůli promoci organiky a `ig-media`).
 3. **Generate Access Token** (přihlásíš se účtem, který má roli na reklamním účtu) → zkopíruj token → `META_ACCESS_TOKEN`. Pokud se dialog ptá, ke kterým stránkám dát přístup, **vyber všechny relevantní** — bez toho scopes stránek nestačí a čtení postů/IG přes stránku selhává (ads příkazy fungují i tak; CLI má fallback).
-4. Krátkodobý token hned vyměň za 60denní: `./run.sh token-extend --write-env`.
+4. Token z Exploreru platí jen ~1–2 hodiny — **hned ho vyměň za 60denní**: `./run.sh token-extend --write-env` (zapíše nový token do `.env`, starý zálohuje do `.env.bak`).
 
 ### 3) Ad account a Page
 
@@ -81,15 +104,16 @@ Meta používá jiný model než Google OAuth: místo refresh tokenu máš **use
 ## Použití — konvence
 
 - **Dry-run default**: každý zápisový příkaz bez `--confirm` jen validuje (Meta `validate_only`), u endpointů bez validace vytiskne plán. Reálný zápis = přidej `--confirm`.
-- **Vše nové vzniká PAUSED** — create/duplicate příkazy nic nespouštějí live.
-- **DELETE je trvalé**: `*-delete` maže jen PAUSED/ARCHIVED entity (`--force` obejde). Preferuj `--status ARCHIVED`.
-- **Částky v měně účtu** (CLI ↔ API centy převádí automaticky). Pozor: měna účtu nemusí být CZK.
+- **Vše nové vzniká PAUSED** — create/duplicate příkazy nic nespouštějí live. **Jediná cesta, jak přes CLI spustit útratu, je explicitní `--status ACTIVE` (resp. `--status-option ACTIVE`) spolu s `--confirm`** — nic se nespustí omylem.
+- **DELETE je trvalé**: `campaign/adset/ad-delete` mažou jen PAUSED/ARCHIVED entity (`--force` obejde). Preferuj `--status ARCHIVED`. (`creative-delete` brzdu nemá — kreativy PAUSED stav neznají; použitou kreativu odmítne smazat Meta sama.)
+- **Částky v měně účtu** (CLI ↔ API centy převádí automaticky). Pozor: měna účtu nemusí být CZK; u měn bez haléřů (JPY, HUF, …) CLI nastavování rozpočtů odmítne.
 - **`--json`** kdykoli výstup parsuje stroj.
 - **`--account-id act_XXX`** před příkazem přepne účet (default z `.env`).
+- `--version` vypíše verzi; barevný banner se tiskne jen člověku v terminálu (respektuje `NO_COLOR`, s `--json` nikdy).
 
 ### Ochrana účtu (rate limity)
 
-CLI parsuje limitové hlavičky po každém callu, persistuje usage do `.usage/`, varuje > 75 %, throttluje > 90 % a **odmítne další cally ≥ 95 %** (override `METAADS_IGNORE_USAGE_GUARD=1`). Rate-limited požadavky opakuje s backoffem 5/15/60 s (respektuje `estimated_time_to_regain_access`). Stav: `./run.sh api-limits`.
+CLI parsuje limitové hlavičky po každém callu, persistuje usage do `.usage/`, varuje > 75 %, throttluje > 90 % a **odmítne další cally ≥ 95 %** na daném účtu. Rate-limited požadavky opakuje s backoffem 5/15/60 s (respektuje `estimated_time_to_regain_access`; při odhadu > 5 min neblokuje terminál a poradí počkat). Stav: `./run.sh api-limits`. Override `METAADS_IGNORE_USAGE_GUARD=1` používej jen, když víš, že hodinové okno už se resetovalo — guard je tu od toho, aby tě chránil před zablokováním účtu.
 
 ## Příkazy
 
@@ -150,15 +174,15 @@ CLI parsuje limitové hlavičky po každém callu, persistuje usage do `.usage/`
 | `creative-from-ig` | Kreativa z IG postu/Reelu (promoce organiky) |
 | `ig-media` | Výpis IG médií page-connected účtu |
 | `preview` | HTML náhled reklamy/kreativy (`--format`, `--out soubor.html`) |
-| `creative-delete` | Trvalé smazání kreativy |
-| `image-upload` | Upload obrázku → hash (s lint kontrolou rozměrů) |
-| `video-upload` | Upload videa → ID (`--wait` počká na zpracování) |
+| `creative-delete` | Trvalé smazání kreativy (bez PAUSED brzdy — kreativy status nemají; použitou odmítne Meta) |
+| `image-upload` | Upload obrázku → hash (s lint kontrolou rozměrů; **zapisuje rovnou**, bez dry-runu — plní jen knihovnu médií) |
+| `video-upload` | Upload videa → ID (`--wait` počká na zpracování; **zapisuje rovnou** — plní jen knihovnu médií) |
 
 ### Insights & analýza
 
 | Příkaz | Popis |
 |---|---|
-| `insights` | Výkonová data (breakdowny vč. asset, atribuce, filtering, sort) |
+| `insights` | Výkonová data (breakdowny vč. asset, atribuce `1d_click`/`7d_click`/`28d_click`/`1d_view`/`1d_ev`, filtering, sort) |
 | `insights-report` | Async report pro velké dotazy |
 | `pulse` | Digest účtu: delty, movery, review, limity, token (`--days`) |
 | `activities` | Historie změn účtu (`--since`, `--category`, `--object-id`) |
@@ -184,8 +208,25 @@ CLI parsuje limitové hlavičky po každém callu, persistuje usage do `.usage/`
 
 V `skill/meta-ads/` je operátorská skill se scénáři (create, optimize, review-check, promoce organiky, creative refresh) a bezpečnostními pravidly. Instalace: [skill/INSTALL.md](skill/INSTALL.md).
 
+## Testy
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/
+```
+
+Suite pokrývá bezpečnostní mechanismy (redakce tokenů, rate-limit guard, dry-run mutací, retry politiku, atomický zápis `.env`) — běží kompletně offline, bez credentials.
+
 ## Dokumentace
 
 - [CHANGELOG.md](CHANGELOG.md) — historie verzí (sleduj přes Watch → Custom → Releases)
 - [docs/api-notes.md](docs/api-notes.md) — reálné chování Marketing API vč. živě ověřených quirků
 - [CLAUDE.md](CLAUDE.md) — orientace pro AI agenty (struktura kódu, safety, release checklist)
+
+## Chyby a náměty
+
+Něco nefunguje nebo chybí? Založ **GitHub Issue**. Pull requesty vítány — repo je primárně výukové, drž se stylu okolního kódu a přilož test.
+
+## Licence
+
+[MIT](LICENSE) © 2026 Jindřich Fáborský

@@ -11,6 +11,7 @@ pip install -r requirements.txt -q
 
 if [ ! -f .env ]; then
   cp .env.example .env
+  chmod 600 .env
   echo "Created .env — fill in your credentials (META_ACCESS_TOKEN, META_AD_ACCOUNT_ID, ...)."
 fi
 

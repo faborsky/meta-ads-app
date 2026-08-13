@@ -38,14 +38,22 @@ def cmd_token_info(args) -> None:
 
 
 def _write_env_token(new_token: str) -> None:
-    """Rewrite META_ACCESS_TOKEN in .env (backup to .env.bak first)."""
+    """Rewrite META_ACCESS_TOKEN in .env (backup to .env.bak first).
+
+    Atomic (temp file + os.replace) so a crash can't truncate .env, and both
+    files get 0600 — they hold live credentials.
+    """
     env_path = os.path.join(api.BASE_DIR, ".env")
     if not os.path.isfile(env_path):
         _die("ERROR: .env not found — cannot write token.")
     with open(env_path) as f:
         lines = f.readlines()
-    with open(env_path + ".bak", "w") as f:
+
+    bak_path = env_path + ".bak"
+    with open(bak_path, "w") as f:
         f.writelines(lines)
+    os.chmod(bak_path, 0o600)
+
     replaced = False
     for i, line in enumerate(lines):
         if line.startswith("META_ACCESS_TOKEN="):
@@ -54,8 +62,12 @@ def _write_env_token(new_token: str) -> None:
             break
     if not replaced:
         lines.append(f"META_ACCESS_TOKEN={new_token}\n")
-    with open(env_path, "w") as f:
+
+    tmp_path = f"{env_path}.tmp.{os.getpid()}"
+    with open(tmp_path, "w") as f:
         f.writelines(lines)
+    os.chmod(tmp_path, 0o600)
+    os.replace(tmp_path, env_path)
 
 
 def cmd_token_extend(args) -> None:
@@ -63,7 +75,9 @@ def cmd_token_extend(args) -> None:
     if not api.META_APP_ID or not api.META_APP_SECRET:
         _die("ERROR: META_APP_ID and META_APP_SECRET must be set in .env")
 
-    data = api._api_call("GET", "oauth/access_token", {
+    # POST keeps client_secret out of the URL (query strings end up in proxy
+    # logs and exception text; form bodies don't).
+    data = api._api_call("POST", "oauth/access_token", {
         "grant_type": "fb_exchange_token",
         "client_id": api.META_APP_ID,
         "client_secret": api.META_APP_SECRET,

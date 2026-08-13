@@ -1,6 +1,6 @@
 # Meta Ads App — CLI for the Meta Marketing API
 
-Python CLI for Facebook & Instagram ads via Marketing API **v25.0**. Version 2.1.0, 47 commands. Czech user docs in [README.md](README.md).
+Python CLI for Facebook & Instagram ads via Marketing API **v25.0**. Version 2.2.0, 47 commands. Czech user docs in [README.md](README.md).
 
 ## Setup
 
@@ -14,12 +14,13 @@ Credentials in `.env`: `META_ACCESS_TOKEN` (60-day long-lived), `META_AD_ACCOUNT
 ## Code structure
 
 - `meta_ads_cli.py` — thin entrypoint + backward-compat re-exports (`_api_call`, `META_AD_ACCOUNT_ID`, …) for scripts that `import meta_ads_cli as cli`
-- `metaads/api.py` — engine: env/config, `_api_call` (retries, error handling), rate-limit header parsing + persistent usage guard (`.usage/`, hard-stop ≥95 %), token-expiry warning (daily cached), `mutate()` with validate_only dry-run
+- `metaads/api.py` — engine: env/config, `_api_call` (Bearer auth, redacted errors, retries — transient retry GET-only), rate-limit header parsing + persistent usage guard (`.usage/`, hard-stop ≥95 %, per-account), token-expiry warning (daily cached, never fatal), `mutate()` with validate_only dry-run, budget currency guard (zero-decimal currencies refused)
 - `metaads/formatting.py` — output helpers (no API logic)
 - `metaads/lint.py` — preflight checks: text lengths/style (Meta editorial policy), URL, CTA, image dimensions
 - `metaads/cli.py` — argparse wiring; `_cmd()` helper = parser/dispatch parity by construction
 - `metaads/commands/*.py` — one module per domain (account, auth, campaigns, adsets, ads, creatives, media, insights, pulse, activity, conversions, targeting); no shared mutable module state
 - `scripts/check_docs_consistency.py` — CLI ↔ docs ↔ skill consistency gate
+- `tests/` — offline pytest suite (no credentials needed): `venv/bin/python -m pytest tests/`; dev deps in `requirements-dev.txt`
 
 ## Commands (47, grouped)
 
@@ -38,7 +39,7 @@ Full flags: README.md command tables, or `--help` per command.
 
 - **Writes default to dry-run** (`execution_options=["validate_only"]`); `--confirm` executes. Endpoints without validate_only (`/copies`, `/budget_schedules`) print a plan and make no call without `--confirm`.
 - All create/duplicate commands default to `--status PAUSED` / PAUSED copies — nothing goes live automatically.
-- `*-delete` refuses non-PAUSED/ARCHIVED entities without `--force`; prefer ARCHIVED (half-way trash, still queryable).
+- `campaign/adset/ad-delete` refuse non-PAUSED/ARCHIVED entities without `--force`; prefer ARCHIVED (half-way trash, still queryable). `creative-delete` has no status brake (creatives have no PAUSED state) — Meta itself refuses to delete an in-use creative.
 - Exception to dry-run: `image-upload`/`video-upload` write directly (media library only, no spend risk).
 - Preflight lint runs locally before creative writes (text lengths, CAPS/punctuation/emoji, URL, CTA, image dimensions).
 - Listings hide `effective_status: DELETED` rows by default.
@@ -49,7 +50,10 @@ Full flags: README.md command tables, or `--help` per command.
 - **DELETE is permanent; ARCHIVED is the trash can.** Deleted objects stay readable by ID (stats 28 days) and linger in edges — the CLI filters them.
 - **Ad review is asynchronous** (typically <24 h). Creative/targeting changes trigger re-review; budget/bid/schedule changes don't. Check with `ad-review` after creating/swapping creatives. Paused ads stay paused after review.
 - **Creatives are immutable** — "editing" = create new creative + swap on ad (`ad-update --creative-id` or `creative-clone --swap-on-ad`).
-- **Rate limits are hourly BUC windows** (dev tier: 300 + 40×active ads calls/h; standard: 100k + 40×active ads). Usage only via response headers; CLI persists it in `.usage/` and hard-stops ≥95 %. Don't parallel-fan-out API calls.
+- **Rate limits are hourly BUC windows** (Limited access tier: 300 + 40×active ads calls/h; Full access: 100k + 40×active ads). Usage only via response headers; CLI persists it in `.usage/` and hard-stops ≥95 % per account. Don't parallel-fan-out API calls.
+- **Transient errors on writes are NOT retried** (the write may have landed — retrying could duplicate objects); the CLI says so and tells you to check with the list command. Reads retry automatically.
+- **Budgets refuse zero-decimal currencies** (JPY, HUF, IDR, …) — the ×100 cents conversion would set 100× the amount. Account currency is cached in `.usage/accounts.json`.
+- **Insights attribution windows**: `7d_view`/`28d_view` were removed by Meta (2026-01) — the CLI rejects them locally; `1d_ev` is valid.
 - **Token dies without warning** on password change (error 190/460) — then `token-extend` can't help, a fresh token from Graph API Explorer is needed. Normal flow: `token-extend --write-env` before the 60-day expiry (CLI warns <7 days).
 - **Budget in cents** internally; CLI accepts account currency. Ad set budget changes limited to 4×/hour (subcode 1487632).
 - Account currency may not be CZK — check `account` before interpreting spend numbers.
@@ -57,7 +61,7 @@ Full flags: README.md command tables, or `--help` per command.
 
 ## Release checklist
 
-Bump `__version__` in `metaads/__init__.py` → update README (version line, 🆕 section, command tables), CLAUDE.md (command count/index), CHANGELOG.md (new `## [x.y.z] — YYYY-MM-DD` entry), bundled skill → run `python scripts/check_docs_consistency.py` (must pass) → commit → tag `vX.Y.Z`. (GitHub Release až po zveřejnění repa. Při zveřejnění přidat **MIT LICENSE** + sekci „Licence" do README — vzor og-refresh-app.)
+Bump `__version__` in `metaads/__init__.py` → update README (version line, 🆕 section, command tables), CLAUDE.md (command count/index), CHANGELOG.md (new `## [x.y.z] — YYYY-MM-DD` entry), bundled skill → run `python scripts/check_docs_consistency.py` (must pass) → run `python -m pytest tests/` (must pass) → commit → tag `vX.Y.Z`. (GitHub Release až po zveřejnění repa. MIT LICENSE + sekce „Licence" v README přidány ve 2.2.0.)
 
 ## Documentation map
 

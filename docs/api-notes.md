@@ -1,10 +1,12 @@
 # Meta Marketing API — poznámky k reálnému chování
 
-Jak se API chová doopravdy. Položky ověřené proti oficiální dokumentaci (research 2026-07-19) vs. položky označené **(živě)** = ověřeno na reálném účtu při vývoji.
+Jak se API chová doopravdy. Položky ověřené proti oficiální dokumentaci (research 2026-07-19, aktualizace 2026-08-13) vs. položky označené **(živě)** = ověřeno na reálném účtu při vývoji.
 
 ## Verze & životní cyklus
 
-- CLI je pinnuté na **v25.0** (release 2026-02-18) — k 2026-07-19 nejnovější verze. v24.0 sunset 2026-10-06, v23.0 mrtvá od 2026-06-09. Marketing API verze žijí ~1 rok; v26.0 se čeká ~září/říjen 2026.
+- CLI je pinnuté na **v25.0** (release 2026-02-18). K 2026-08-13: **nejnovější je v26.0 (release 2026-07-29)**; Marketing API sunset v25.0 **není oznámen (TBD)** — podle ~1ročního vzoru čekej ~polovinu 2027. v24.0 sunset 2026-10-06, v23.0 mrtvá od 2026-06-09.
+- **Auto-upgrade verzí (od 2026-07-29)**: cally na deprecated verzi Meta u endpointů nezasažených breaking changes automaticky povýší na další verzi (odpověď nese hlavičku `X-Ad-Api-Version-Warning`); endpointy se změnami dál failují. Jde vypnout v App Dashboardu.
+- **Co si pohlídat při bumpu na v26.0**: Instagram **Explore placement** explicitně uvedený v `instagram_positions` → error; special ad categories (housing/employment/credit) nově **vyžadují explicitní** `targeting_automation.advantage_audience` 0/1 (CLI flag `--advantage-audience` existuje); Messenger Stories `story` se tiše zahazuje. `/copies`, `/budget_schedules`, `validate_only`, media a search endpointy beze změn.
 - **Legacy Advantage+ Shopping/App kampaně** (`smart_promotion_type=AUTOMATED_SHOPPING_ADS`/`SMART_APP_PROMOTION`): create/duplicate/update **blokované na všech verzích API** od 2026-05-19; v září 2026 Meta zbývající legacy kampaně zapauzuje. Dnešní Advantage+ Sales = obyčejná `OUTCOME_SALES` kampaň + 3 automatizační páky (CBO rozpočet na kampani, `targeting_automation.advantage_audience=1`, žádná omezení placementů). Stav čti z read-only `advantage_state_info` (campaign-detail ho zobrazuje).
 
 ## Rate limity (BUC model — hodinová okna)
@@ -19,7 +21,7 @@ Jak se API chová doopravdy. Položky ověřené proti oficiální dokumentaci (
 - Usage se čte **jen z response hlaviček** — žádný proaktivní endpoint neexistuje. Hlavička `X-Business-Use-Case-Usage`: `call_count`/`total_cputime`/`total_time` jsou **procenta** limitu, `estimated_time_to_regain_access` je v **minutách**, k tomu `ads_api_access_tier`.
 - CLI: hlavičky parsuje po každém callu, persistuje do `.usage/usage.json`, varuje > 75 %, throttluje > 90 % a **hard-stopne ≥ 95 %** (čerstvá data < 10 min; override `METAADS_IGNORE_USAGE_GUARD=1`). `api-limits` ukáže aktuální stav.
 - Error kódy: 17 (user request limit), 32 (page limit), 613 (custom/QPS/ad-creation cap dle spend limitu — subcode 1487225), 80000/80004 (BUC throttle; 80004 = ads_management), 4 (app limit / insights přetížení).
-- Upgrade na standard tier = Advanced Access na „Ads Management Standard Access" v App Dashboardu.
+- **Přejmenování tierů (2026-05-04)**: „Ads Management Standard Access" → **„Marketing API Access Tier"** s úrovněmi **Limited access** (= starý development; stačí na vlastní/spravované účty, bez app review) a **Full access** (= starý standard; potřeba jen pro obsluhu cizích účtů — business verification + app review; auto-approval práh snížen na 500 callů / 15 dní s error rate < 15 %). Hlavička `ads_api_access_tier` zatím vrací staré hodnoty `development_access`/`standard_access`.
 
 ## Dry-run mutací (validate_only)
 
@@ -62,7 +64,8 @@ Jak se API chová doopravdy. Položky ověřené proti oficiální dokumentaci (
 
 - **Breakdowny** (80+): demografie (`age`, `gender`), geo (`country`, `region`, `dma`), platformy (`publisher_platform`, `platform_position`, `device_platform`, `impression_device`), hodinové, **asset breakdowny pro Advantage+** (`image_asset`, `video_asset`, `body_asset`, `title_asset`, `description_asset`, `link_url_asset`, `call_to_action_asset`, `ad_format_asset`). Kombinace jen ve vyjmenovaných permutacích; hourly nejde s reach/unique metrikami.
 - **action_breakdowns**: `action_type`, `action_device`, `action_destination`, `action_video_type`, `action_carousel_card_id`, …
-- **Atribuce**: `action_attribution_windows` (`1d_click`…`28d_view`, `dda`, `default`; default `["7d_click","1d_view"]`). `use_unified_attribution_setting=true` = čísla shodná s Ads Managerem (CLI: `--unified-attribution`).
+- **Atribuce**: `action_attribution_windows` — platná okna k 2026: `1d_click`, `7d_click`, `28d_click`, `1d_view`, `1d_ev` (engaged view), `dda`, `default`; default `["7d_click","1d_view"]`. **`7d_view` a `28d_view` Meta odstranila 2026-01-12** — requesty s nimi vracejí **tiché nuly, ne chybu** (CLI je proto odmítá lokálně). `use_unified_attribution_setting=true` = čísla shodná s Ads Managerem (CLI: `--unified-attribution`).
+- **Retention limity insights (od 2026-01-12)**: agregovaná data 37 měsíců zpět, **unique-count metriky a hourly breakdowny jen 13 měsíců**, frequency breakdowny 6 měsíců. Starší dotazy vracejí prázdno/nuly bez chyby.
 - **Async job**: `POST /{object}/insights` → `report_run_id` → poll `async_status` (`Job Completed`/`Failed`/`Skipped`) → `GET /{report_run_id}/insights`. Od v25.0 failed job vrací `error_code`, `error_message`, `error_subcode`, `error_user_title`, `error_user_msg`. report_run_id expiruje po 30 dnech.
 - **Data freshness**: refresh à 15 min; metriky **zamrzají 28 dní** po reportovaném dni (do té doby se mohou měnit). Delta API neexistuje — bezpečný sync pattern = přetahovat posledních 28 dní, starší cachovat.
 - `date_preset` nově i `last_3d`, `last_28d`, `this_week_mon_today`, `data_maximum`.
@@ -91,7 +94,8 @@ Jak se API chová doopravdy. Položky ověřené proti oficiální dokumentaci (
 - Long-lived user token = 60 dní; obnova `GET /oauth/access_token?grant_type=fb_exchange_token&client_id&client_secret&fb_exchange_token` (CLI: `token-extend`, s `--write-env` rovnou zapíše `.env`). **Prošlý/invalidovaný token vyměnit nejde** — nutný nový login (Graph API Explorer / Business Manager).
 - Error 190 subcode 460 = session invalidated (změna hesla / bezpečnostní reset) — token je mrtvý okamžitě, bez ohledu na expiry. **(živě, 2026-07-19)**
 - Alternativa pro server-to-server: **system user token** z Business Manageru (jde vygenerovat i never-expiring) — CLI ho podporuje (debug_token vrací `expires_at: 0` → „Never").
-- CLI cachuje expiry v `.usage/token.json` (kontrola max 1× denně) a varuje na stderr < 7 dní.
+- CLI cachuje expiry v `.usage/token.json` (kontrola max 1× denně, klíčovaná hashem tokenu) a varuje na stderr < 7 dní. Kontrola je best-effort — její selhání (offline, captive portál) nikdy neshodí samotný příkaz.
+- Graph API přijímá token i v hlavičce **`Authorization: Bearer <token>`** — CLI ji od 2.2.0 používá místo query parametru (token se tak nedostane do URL, proxy logů ani textu výjimek).
 
 ## Cílení
 

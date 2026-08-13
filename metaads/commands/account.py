@@ -76,8 +76,9 @@ def cmd_pages(args) -> None:
 def cmd_api_limits(args) -> None:
     """Show current API usage per account (refreshed via a cheap GET)."""
     account_id = account_of(args)
-    # Cheap call whose response headers refresh the persisted usage data
-    api._api_call("GET", account_id, {"fields": "id"})
+    # Cheap call whose response headers refresh the persisted usage data.
+    # Skips the usage guard — this IS the diagnostic tool for a hot account.
+    api._api_call("GET", account_id, {"fields": "id"}, _skip_guard=True)
 
     usage = api._load_usage()
     token_days = api.token_days_left()
@@ -105,8 +106,9 @@ def cmd_api_limits(args) -> None:
         print(f"Token expires in: {token_days} day(s)")
     print("""
 Limits (Marketing API, per app + ad account, hourly):
-  development tier:  300 + 40 × active ads   calls/hour
-  standard tier:     100 000 + 40 × active ads calls/hour
-  mutations:         100 QPS (error 613/5044001)
+  development tier (Limited access):  300 + 40 × active ads   calls/hour
+  standard tier (Full access):        100 000 + 40 × active ads calls/hour
+  mutations:                          100 QPS (error 613/5044001)
+(Meta renamed the tiers 2026-05: Limited access = old development, Full access = old standard.)
 Error codes: 17 user limit | 32 page limit | 613 custom/QPS | 80000/80004 BUC throttle
 No proactive usage endpoint exists — usage comes from response headers only.""")

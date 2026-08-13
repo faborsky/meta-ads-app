@@ -16,6 +16,28 @@ def account_of(args) -> str:
     return args.account_id or api.META_AD_ACCOUNT_ID
 
 
+def parse_json_arg(value: str | None, flag: str):
+    """json.loads a CLI flag value with a clean error instead of a traceback."""
+    if value is None:
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as e:
+        _die(f"ERROR: {flag} is not valid JSON ({e}).\n  Got: {value[:120]}")
+
+
+def parse_genders(value: str) -> list[int]:
+    """Parse --genders '1,2' with a clean error for '--genders male'."""
+    result = []
+    for g in value.split(","):
+        g = g.strip()
+        if g not in ("1", "2"):
+            _die(f"ERROR: --genders takes 1 (male) and/or 2 (female), comma-separated "
+                 f"— e.g. --genders 1,2 (got '{g}').")
+        result.append(int(g))
+    return result
+
+
 def status_filter_param(status: str | None) -> dict:
     """Build the `filtering` param for an effective_status filter."""
     if not status:
@@ -50,6 +72,14 @@ def delete_with_brake(kind: str, object_id: str, args) -> None:
     effective = data.get("effective_status", "?")
 
     if not args.confirm:
+        if args.json:
+            _output_json({
+                "executed": False,
+                "would_delete": {"kind": kind, "id": str(object_id), "name": name,
+                                 "status": status, "effective_status": effective},
+                "note": "DELETE is permanent; consider ARCHIVED. Add --confirm to execute.",
+            })
+            return
         print(f"DRY-RUN: would DELETE {kind} {object_id} \"{name}\" (status {status}, effective {effective}).")
         print("⚠ DELETE is permanent. Consider ARCHIVED instead "
               f"({kind}-update --status ARCHIVED --confirm) — archived objects stay queryable.")
@@ -63,7 +93,7 @@ def delete_with_brake(kind: str, object_id: str, args) -> None:
         )
 
     api._api_call("DELETE", str(object_id), {})
-    result = {"deleted": object_id, "kind": kind, "name": name}
+    result = {"executed": True, "deleted": str(object_id), "kind": kind, "name": name}
     if args.json:
         _output_json(result)
     else:

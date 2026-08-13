@@ -9,6 +9,8 @@ from metaads.commands.common import (
     account_of,
     delete_with_brake,
     drop_deleted,
+    parse_genders,
+    parse_json_arg,
     status_filter_param,
 )
 from metaads.formatting import _budget_to_cents, _die, _format_budget, _output_json, _truncate
@@ -50,7 +52,7 @@ def build_targeting(args, base: dict | None = None) -> dict:
     if getattr(args, "age_max", None):
         targeting["age_max"] = args.age_max
     if getattr(args, "genders", None):
-        targeting["genders"] = [int(g) for g in _split_csv(args.genders)]
+        targeting["genders"] = parse_genders(args.genders)
     if getattr(args, "advantage_audience", None) is not None:
         ta = targeting.setdefault("targeting_automation", {})
         ta["advantage_audience"] = args.advantage_audience
@@ -209,7 +211,7 @@ def cmd_adset_create(args) -> None:
             _die("ERROR: --daily-budget or --lifetime-budget required "
                  "(or --cbo when the campaign holds the budget).")
 
-    base = json.loads(args.targeting) if args.targeting else {}
+    base = parse_json_arg(args.targeting, "--targeting") or {}
     targeting = build_targeting(args, base)
     if not targeting.get("geo_locations"):
         _die('ERROR: targeting must include geo_locations (use --countries CZ or --targeting JSON).')
@@ -223,6 +225,8 @@ def cmd_adset_create(args) -> None:
         "status": args.status,
     }
 
+    if args.daily_budget or args.lifetime_budget or args.bid_amount:
+        api.budget_currency_guard(account_id)
     if args.daily_budget:
         params["daily_budget"] = _budget_to_cents(args.daily_budget)
     if args.lifetime_budget:
@@ -256,6 +260,8 @@ def cmd_adset_update(args) -> None:
     """Update an existing ad set (dry-run/validate by default)."""
     params: dict = {}
 
+    if any(v is not None for v in (args.daily_budget, args.lifetime_budget, args.bid_amount)):
+        api.budget_currency_guard(account_of(args))
     if args.name:
         params["name"] = args.name
     if args.status:
@@ -286,7 +292,7 @@ def cmd_adset_update(args) -> None:
                   "device_platforms")
     )
     if args.targeting:
-        params["targeting"] = json.dumps(build_targeting(args, json.loads(args.targeting)))
+        params["targeting"] = json.dumps(build_targeting(args, parse_json_arg(args.targeting, "--targeting")))
     elif has_targeting_flags:
         current = api._api_call("GET", str(args.adset_id), {"fields": "targeting"}).get("targeting", {})
         params["targeting"] = json.dumps(build_targeting(args, current))

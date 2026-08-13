@@ -6,8 +6,10 @@ module attribute (``api._rate_limit_usage``), never via ``from`` import.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -31,9 +33,31 @@ META_APP_ID = os.getenv("META_APP_ID", "")
 META_APP_SECRET = os.getenv("META_APP_SECRET", "")
 
 API_VERSION = "v25.0"
-API_BASE = f"https://graph.facebook.com/{API_VERSION}"
+GRAPH_HOST = "https://graph.facebook.com"
+API_BASE = f"{GRAPH_HOST}/{API_VERSION}"
 
 USAGE_DIR = os.path.join(BASE_DIR, ".usage")
+
+# Currencies Meta bills without a cents offset (offset 1, not 100) — the CLI's
+# ×100 budget conversion would set 100× the intended budget on these accounts.
+ZERO_DECIMAL_CURRENCIES = {
+    "CLP", "COP", "CRC", "HUF", "IDR", "ISK", "JPY", "KRW", "PYG", "TWD", "VND",
+}
+
+# Secrets never belong in error output — requests exceptions embed the full
+# URL, and paginated `next` URLs may carry a token in the query string.
+_SECRET_PARAM_RE = re.compile(
+    r"(access_token|client_secret|fb_exchange_token|input_token)=[^&\s'\"]+"
+)
+
+
+def _redact(text: str) -> str:
+    """Replace secret query-param values in arbitrary text with REDACTED."""
+    return _SECRET_PARAM_RE.sub(r"\1=REDACTED", text)
+
+
+def _auth_headers() -> dict:
+    return {"Authorization": f"Bearer {META_ACCESS_TOKEN}"}
 
 # Hard-stop threshold (%) for the persistent usage guard. Meta limits are
 # dynamic (hourly windows), so we guard on the last-seen usage percentage.
@@ -71,11 +95,18 @@ def _load_usage() -> dict:
         return {}
 
 
+def _write_json_atomic(path: str, data: dict) -> None:
+    """Write JSON via temp file + os.replace so readers never see a torn file."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
 def _save_usage(data: dict) -> None:
     try:
-        os.makedirs(USAGE_DIR, exist_ok=True)
-        with open(_usage_file(), "w") as f:
-            json.dump(data, f)
+        _write_json_atomic(_usage_file(), data)
     except OSError:
         pass  # guard is best-effort; never break the actual call
 
@@ -93,13 +124,23 @@ def _record_usage(account_id: str, pct: float, tier: str | None = None) -> None:
 def _usage_guard(endpoint: str) -> None:
     """Hard-stop before a call when last-seen usage crossed the threshold.
 
-    Only recent readings count (Meta windows are hourly and roll off). Override
-    with METAADS_IGNORE_USAGE_GUARD=1 when you know the window has reset.
+    Only recent readings count (Meta windows are hourly and roll off). When the
+    endpoint names an ad account (act_…), only that account's usage blocks —
+    a hot account A must not block calls on account B. Endpoints without an
+    account (object IDs, search) are guarded against any hot account
+    (conservative). Override with METAADS_IGNORE_USAGE_GUARD=1 when you know
+    the window has reset.
     """
     if os.getenv("METAADS_IGNORE_USAGE_GUARD"):
         return
+    m = re.search(r"act_(\d+)", endpoint)
+    target_account = m.group(1) if m else None
     data = _load_usage()
     for account_id, entry in data.items():
+        acc = str(account_id)
+        acc = acc[4:] if acc.startswith("act_") else acc
+        if target_account and acc != target_account:
+            continue
         pct = entry.get("pct", 0)
         age = time.time() - entry.get("ts", 0)
         if pct >= USAGE_HARD_STOP and age < USAGE_GUARD_FRESH_SECS:
@@ -118,6 +159,12 @@ def _parse_rate_limit_headers(headers) -> None:
         try:
             usage_data = json.loads(buc)
             for account_id, entries in usage_data.items():
+                # One header can carry several ads_* use cases per account
+                # (ads_management + ads_insights). Record the MAX across all of
+                # them, once — recording per entry would let a low entry
+                # overwrite a hot one and silently disarm the hard stop.
+                max_usage = None
+                tier = None
                 for entry in entries:
                     # BUC headers also carry page/messaging use cases — only
                     # ads-related usage matters for this CLI's guard.
@@ -126,15 +173,19 @@ def _parse_rate_limit_headers(headers) -> None:
                     call_count = entry.get("call_count", 0)
                     total_cputime = entry.get("total_cputime", 0)
                     total_time = entry.get("total_time", 0)
-                    max_usage = max(call_count, total_cputime, total_time)
-                    _record_usage(account_id, max_usage, entry.get("ads_api_access_tier"))
+                    max_usage = max(call_count, total_cputime, total_time,
+                                    max_usage if max_usage is not None else 0)
+                    tier = entry.get("ads_api_access_tier") or tier
+                if max_usage is None:
+                    continue
+                _record_usage(account_id, max_usage, tier)
 
-                    if max_usage > 90:
-                        _err(f"⚠ Rate limit critical ({max_usage}%) for {account_id}. Throttling...")
-                        time.sleep(2)
-                    elif max_usage > 75:
-                        _err(f"⚠ Rate limit warning ({max_usage}%) for {account_id}.")
-        except (json.JSONDecodeError, AttributeError):
+                if max_usage > 90:
+                    _err(f"⚠ Rate limit critical ({max_usage}%) for {account_id}. Throttling...")
+                    time.sleep(2)
+                elif max_usage > 75:
+                    _err(f"⚠ Rate limit warning ({max_usage}%) for {account_id}.")
+        except (json.JSONDecodeError, AttributeError, TypeError):
             pass
 
     aau = headers.get("X-Ad-Account-Usage") or headers.get("x-ad-account-usage")
@@ -177,11 +228,19 @@ def _token_cache_file() -> str:
     return os.path.join(USAGE_DIR, "token.json")
 
 
+def _token_fingerprint() -> str:
+    """Cache-invalidation key for the current token — a hash, never the token."""
+    return hashlib.sha256(META_ACCESS_TOKEN.encode()).hexdigest()[:12]
+
+
 def maybe_warn_token_expiry() -> None:
     """Warn on stderr when the token expires in < TOKEN_WARN_DAYS.
 
     Expiry is cached in .usage/token.json; the debug_token call runs at most
-    once per 24 h so the warning costs nothing on normal usage.
+    once per 24 h so the warning costs nothing on normal usage. The probe is
+    strictly best-effort: it bypasses _api_call so no failure mode (offline,
+    captive portal, debug_token permission error) can kill the actual command.
+    A failed probe is cached too (1 h back-off) so it can't re-fire every run.
     """
     cache: dict = {}
     try:
@@ -192,27 +251,39 @@ def maybe_warn_token_expiry() -> None:
 
     now = time.time()
     # Re-check when cache is stale or belongs to a different token.
-    token_tail = META_ACCESS_TOKEN[-12:]
-    if cache.get("token_tail") != token_tail or now - cache.get("checked_at", 0) > 86400:
+    fingerprint = _token_fingerprint()
+    max_age = 3600 if cache.get("check_failed") else 86400
+    if cache.get("token_hash") != fingerprint or now - cache.get("checked_at", 0) > max_age:
+        cache = {"token_hash": fingerprint, "checked_at": now}
         try:
-            data = _api_call("GET", "debug_token", {"input_token": META_ACCESS_TOKEN})
-            expires_at = data.get("data", {}).get("expires_at", 0)
-        except SystemExit:
-            raise
+            resp = requests.get(
+                f"{API_BASE}/debug_token",
+                params={"input_token": META_ACCESS_TOKEN},
+                headers=_auth_headers(),
+                timeout=15,
+            )
+            payload = resp.json()
+            if "error" in payload:
+                cache["check_failed"] = True
+            else:
+                cache["expires_at"] = payload.get("data", {}).get("expires_at", 0)
         except Exception:
-            return
-        cache = {"token_tail": token_tail, "checked_at": now, "expires_at": expires_at}
+            cache["check_failed"] = True
         try:
-            os.makedirs(USAGE_DIR, exist_ok=True)
-            with open(_token_cache_file(), "w") as f:
-                json.dump(cache, f)
+            _write_json_atomic(_token_cache_file(), cache)
         except OSError:
             pass
 
     expires_at = cache.get("expires_at", 0)
     if expires_at:
         days_left = (datetime.fromtimestamp(expires_at) - datetime.now()).days
-        if days_left < TOKEN_WARN_DAYS:
+        if days_left < 0:
+            _err(
+                f"⚠ META_ACCESS_TOKEN expired {-days_left} day(s) ago "
+                f"({datetime.fromtimestamp(expires_at):%Y-%m-%d}). "
+                "Generate a new token (Graph API Explorer) — expired tokens can't be extended."
+            )
+        elif days_left < TOKEN_WARN_DAYS:
             _err(
                 f"⚠ META_ACCESS_TOKEN expires in {days_left} day(s) "
                 f"({datetime.fromtimestamp(expires_at):%Y-%m-%d}). Run: token-extend"
@@ -243,6 +314,7 @@ def _api_call(
     files: dict | None = None,
     timeout: int = 60,
     _retry: int = 0,
+    _skip_guard: bool = False,
 ) -> dict:
     """Make a Meta Marketing API call.
 
@@ -250,31 +322,42 @@ def _api_call(
     endpoint: API path (e.g., 'act_123/campaigns' or '12345') or a full URL
     params: query params for GET, form data for POST
     files: multipart files for upload
+
+    The token travels in the Authorization header, never in the URL — so it
+    can't leak through exception text, proxy logs or pagination links.
     """
-    url = f"{API_BASE}/{endpoint}" if not endpoint.startswith("http") else endpoint
+    if endpoint.startswith("http"):
+        # Only Meta's own pagination links ever arrive as full URLs.
+        if not endpoint.startswith(GRAPH_HOST):
+            _die(f"ERROR: refusing to call a non-Graph URL: {_redact(endpoint)}")
+        url = endpoint
+    else:
+        url = f"{API_BASE}/{endpoint}"
 
-    if params is None:
-        params = {}
-    params["access_token"] = META_ACCESS_TOKEN
+    params = dict(params) if params else {}
+    headers = _auth_headers()
+    if "access_token=" in url:
+        headers = {}  # token already in the URL (legacy paging link) — don't send two
 
-    _usage_guard(endpoint)
+    if not _skip_guard:
+        _usage_guard(endpoint)
 
     try:
         if method == "GET":
-            resp = requests.get(url, params=params, timeout=timeout)
+            resp = requests.get(url, params=params, headers=headers, timeout=timeout)
         elif method == "POST":
             if files:
-                resp = requests.post(url, data=params, files=files, timeout=timeout)
+                resp = requests.post(url, data=params, files=files, headers=headers, timeout=timeout)
             else:
-                resp = requests.post(url, data=params, timeout=timeout)
+                resp = requests.post(url, data=params, headers=headers, timeout=timeout)
         elif method == "DELETE":
-            resp = requests.delete(url, params=params, timeout=timeout)
+            resp = requests.delete(url, params=params, headers=headers, timeout=timeout)
         else:
             _die(f"ERROR: Unknown HTTP method: {method}")
     except requests.exceptions.Timeout:
-        _die(f"ERROR: Request timed out ({timeout}s) for {method} {endpoint}")
+        _die(f"ERROR: Request timed out ({timeout}s) for {method} {_redact(endpoint)}")
     except requests.exceptions.ConnectionError as e:
-        _die(f"ERROR: Connection failed for {method} {endpoint}: {e}")
+        _die(f"ERROR: Connection failed for {method} {_redact(endpoint)}: {_redact(str(e))}")
 
     _parse_rate_limit_headers(resp.headers)
 
@@ -301,7 +384,8 @@ def _api_call(
         if code in (10, 200, 294):
             _die(f"ERROR: Permission denied (code {code}): {message}")
 
-        # Rate limiting — recoverable with backoff
+        # Rate limiting — recoverable with backoff. These are rejections
+        # (nothing was written), so retrying POSTs here is safe.
         if code in (4, 17, 32) or code in (80000, 80001, 80002, 80003, 80004, 80008, 80014):
             if _retry < len(_RETRY_DELAYS):
                 delay = _RETRY_DELAYS[_retry]
@@ -310,11 +394,19 @@ def _api_call(
                     try:
                         for entries in json.loads(buc).values():
                             for entry in entries:
+                                if not str(entry.get("type", "ads_management")).startswith("ads"):
+                                    continue
                                 est = entry.get("estimated_time_to_regain_access", 0)
                                 if est > 0:
                                     delay = max(delay, est * 60)  # minutes → seconds
-                    except (json.JSONDecodeError, AttributeError):
+                    except (json.JSONDecodeError, AttributeError, TypeError):
                         pass
+                if delay > 300:
+                    _die(
+                        f"ERROR: Rate limited (code {code}) — Meta reports ~{delay // 60} min "
+                        "until access returns. Not waiting that long; try again later "
+                        "(check with: api-limits)."
+                    )
                 _err(f"Rate limited (code {code}), waiting {delay}s (retry {_retry + 1}/{len(_RETRY_DELAYS)})...")
                 time.sleep(delay)
                 return _api_call(method, endpoint, params, files, timeout, _retry + 1)
@@ -332,12 +424,21 @@ def _api_call(
         if code == 613 and subcode == 1487632:
             _die("ERROR: Ad set budget can only change 4 times per hour. Wait and retry.")
 
-        # Transient errors — auto-retry
-        if is_transient and _retry < 3:
-            delay = [2, 5, 15][_retry]
-            _err(f"Transient error, retrying in {delay}s...")
-            time.sleep(delay)
-            return _api_call(method, endpoint, params, files, timeout, _retry + 1)
+        # Transient errors — auto-retry READS only. Meta occasionally reports
+        # is_transient AFTER a write actually landed; blindly re-sending a
+        # POST can create the campaign/ad/copy twice.
+        if is_transient:
+            if method == "GET" and _retry < 3:
+                delay = [2, 5, 15][_retry]
+                _err(f"Transient error, retrying in {delay}s...")
+                time.sleep(delay)
+                return _api_call(method, endpoint, params, files, timeout, _retry + 1)
+            if method != "GET":
+                _err(f"ERROR: Transient error from Meta on {method} {_redact(endpoint)}: {message}")
+                _die(
+                    "  Not retrying automatically — the write MAY have landed despite the error.\n"
+                    "  Check with the matching list command (campaigns/adsets/ads/creatives) before retrying."
+                )
 
         # Validation errors — show blame fields + user message
         if code == 100:
@@ -390,6 +491,55 @@ def _paginate(endpoint: str, params: dict, max_items: int = 100) -> list:
             break
 
     return items[:max_items]
+
+
+# ---------------------------------------------------------------------------
+# Budget currency guard
+# ---------------------------------------------------------------------------
+
+def _accounts_cache_file() -> str:
+    return os.path.join(USAGE_DIR, "accounts.json")
+
+
+def get_account_currency(account_id: str) -> str | None:
+    """Account currency, cached in .usage/accounts.json (currency ~never changes)."""
+    cache: dict = {}
+    try:
+        with open(_accounts_cache_file()) as f:
+            cache = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        pass
+    entry = cache.get(account_id) or {}
+    if entry.get("currency"):
+        return entry["currency"]
+    try:
+        data = _api_call("GET", account_id, {"fields": "currency"})
+    except SystemExit:
+        return None  # guard is best-effort; the budget call itself will fail loudly
+    currency = data.get("currency")
+    if currency:
+        cache[account_id] = {"currency": currency, "ts": time.time()}
+        try:
+            _write_json_atomic(_accounts_cache_file(), cache)
+        except OSError:
+            pass
+    return currency
+
+
+def budget_currency_guard(account_id: str) -> None:
+    """Refuse budget math on zero-decimal currencies (JPY, HUF, …).
+
+    The CLI converts budgets with a ×100 offset. Meta bills these currencies
+    with offset 1 — the conversion would set 100× the intended budget.
+    """
+    currency = get_account_currency(account_id)
+    if currency in ZERO_DECIMAL_CURRENCIES:
+        _die(
+            f"ERROR: account {account_id} is billed in {currency}, which has no "
+            "cents (offset 1). This CLI's budget conversion assumes offset 100 and "
+            "would set 100× the intended amount.\n"
+            "  Set budgets for this account in Ads Manager, or open a GitHub issue."
+        )
 
 
 # ---------------------------------------------------------------------------

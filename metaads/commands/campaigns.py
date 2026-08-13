@@ -9,6 +9,7 @@ from metaads.commands.common import (
     account_of,
     delete_with_brake,
     drop_deleted,
+    parse_json_arg,
     parse_time_to_unix,
     status_filter_param,
 )
@@ -117,9 +118,13 @@ def cmd_campaign_create(args) -> None:
         "name": args.name,
         "objective": args.objective,
         "status": args.status,
-        "special_ad_categories": json.dumps(json.loads(args.special_ad_categories) if args.special_ad_categories else []),
+        "special_ad_categories": json.dumps(
+            parse_json_arg(args.special_ad_categories, "--special-ad-categories") or []
+        ),
     }
 
+    if args.daily_budget or args.lifetime_budget:
+        api.budget_currency_guard(account_id)
     if args.daily_budget:
         params["daily_budget"] = _budget_to_cents(args.daily_budget)
     if args.lifetime_budget:
@@ -148,6 +153,8 @@ def cmd_campaign_update(args) -> None:
     """Update an existing campaign (dry-run/validate by default)."""
     params: dict = {}
 
+    if args.daily_budget is not None or args.lifetime_budget is not None:
+        api.budget_currency_guard(account_of(args))
     if args.name:
         params["name"] = args.name
     if args.status:
@@ -227,9 +234,10 @@ def cmd_budget_schedule(args) -> None:
 
     value = args.value
     if args.value_type == "ABSOLUTE":
+        api.budget_currency_guard(account_of(args))
         value = _budget_to_cents(value)
     else:
-        value = int(value)  # MULTIPLIER: percentage of base budget (e.g. 200 = 2×)
+        value = int(round(value))  # MULTIPLIER: percentage of base budget (e.g. 200 = 2×)
 
     params = {
         "time_start": parse_time_to_unix(args.start),

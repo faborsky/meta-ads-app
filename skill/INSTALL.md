@@ -20,7 +20,7 @@ sed -i '' "s#<META_APP_DIR>#$APP_DIR#g" ~/.claude/skills/meta-ads/SKILL.md ~/.cl
 
 ## 3. Ověř
 
-V Claude Code spusť `/meta-ads` — skill by měl načíst účet přes `run.sh account`. Pokud hlásí, že `<META_APP_DIR>` je stále v souboru, krok 2 se nepovedl.
+V Claude Code spusť `/meta-ads` — bare volání spustí přehled účtu (`run.sh pulse`). Pokud skill hlásí, že `<META_APP_DIR>` je stále v souboru, krok 2 se nepovedl.
 
 ## Doplň si vlastní know-how (volitelné, doporučené)
 

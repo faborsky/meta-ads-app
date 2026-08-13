@@ -7,7 +7,7 @@ import copy
 import json
 
 from metaads import api, lint
-from metaads.commands.common import account_of, drop_deleted
+from metaads.commands.common import account_of, drop_deleted, parse_json_arg
 from metaads.formatting import _die, _err, _output_json, _truncate
 
 CREATIVE_LIST_FIELDS = "id,name,status,thumbnail_url,title,body,link_url,image_url,call_to_action_type,object_type"
@@ -137,7 +137,7 @@ def cmd_creative_create(args) -> None:
         link_data_c: dict = {
             "link": args.link,
             "message": args.message or "",
-            "child_attachments": json.loads(args.child_attachments),
+            "child_attachments": parse_json_arg(args.child_attachments, "--child-attachments"),
         }
         if args.call_to_action:
             link_data_c["call_to_action"] = {"type": args.call_to_action}
@@ -421,11 +421,24 @@ def cmd_preview(args) -> None:
 
 
 def cmd_creative_delete(args) -> None:
-    """Delete a creative (permanent!). Fails on Meta side if the creative is in use."""
+    """Delete a creative (permanent!). Fails on Meta side if the creative is in use.
+
+    Note: unlike campaign/adset/ad-delete there is no PAUSED brake — creatives
+    have no PAUSED status. The server-side protection is Meta refusing to
+    delete a creative that is used by an ad.
+    """
     data = api._api_call("GET", str(args.creative_id), {"fields": "name,status"})
     name = data.get("name", "---")
 
     if not args.confirm:
+        if args.json:
+            _output_json({
+                "executed": False,
+                "would_delete": {"kind": "creative", "id": str(args.creative_id),
+                                 "name": name, "status": data.get("status", "?")},
+                "note": "DELETE is permanent. Add --confirm to execute.",
+            })
+            return
         print(f"DRY-RUN: would DELETE creative {args.creative_id} \"{name}\" "
               f"(status {data.get('status', '?')}).")
         print("⚠ DELETE is permanent. Add --confirm to execute.")
@@ -433,6 +446,6 @@ def cmd_creative_delete(args) -> None:
 
     api._api_call("DELETE", str(args.creative_id), {})
     if args.json:
-        _output_json({"deleted": args.creative_id, "name": name})
+        _output_json({"executed": True, "deleted": str(args.creative_id), "name": name})
     else:
         print(f"Creative {args.creative_id} \"{name}\" deleted.")

@@ -233,7 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="targeting_automation.advantage_audience (Advantage+ audience)")
     sp.add_argument("--publisher-platforms", help="Comma: facebook,instagram,audience_network,messenger (manual placements)")
     sp.add_argument("--facebook-positions", help="Comma: feed,facebook_reels,story,marketplace,search,...")
-    sp.add_argument("--instagram-positions", help="Comma: stream,story,reels,explore,...")
+    sp.add_argument("--instagram-positions", help="Comma: stream,story,reels,...")
     sp.add_argument("--device-platforms", help="Comma: mobile,desktop")
     sp.add_argument("--bid-amount", type=float, help="Bid/cost cap in account currency")
     sp.add_argument("--bid-strategy", choices=BID_STRATEGIES)
@@ -450,9 +450,11 @@ def main() -> None:
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
     _print_banner()
-    api.check_config()
+    # parse_args first: --help/--version must work before .env is filled in
+    # (argparse handles both during parsing and exits on its own).
     parser = build_parser()
     args = parser.parse_args()
+    api.check_config()
 
     if args.account_id and not args.account_id.startswith("act_"):
         args.account_id = f"act_{args.account_id}"
