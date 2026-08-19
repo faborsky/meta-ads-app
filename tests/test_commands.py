@@ -305,3 +305,133 @@ def test_insights_no_warning_without_paging_next(monkeypatch, capsys):
     insights.cmd_insights(_insight_args(object_id=None, json=True, limit=100,
                                         account_id=None))
     assert "Truncated" not in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# creative-create --type flex: asset_feed_spec from scratch (issue #3)
+# ---------------------------------------------------------------------------
+
+def _flex_args(**over):
+    base = dict(name="F", type="flex", page_id="123", link="https://ex.cz",
+                message=["Text A", "Text B"], headline=["Titulek"], description=None,
+                image_hash=["h1", "h2"], image_url=None, video_id=None,
+                video_thumbnail=None, call_to_action="LEARN_MORE",
+                child_attachments=None, url_tags=None, lead_gen_form_id=None,
+                ig_user_id=None, no_enhancements=True,
+                confirm=False, json=True, account_id=None)
+    base.update(over)
+    return Namespace(**base)
+
+
+def _capture_create(monkeypatch, args):
+    captured = {}
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_create(args)
+    return captured
+
+
+def test_flex_builds_asset_feed_spec(monkeypatch, capsys):
+    captured = _capture_create(monkeypatch, _flex_args())
+    afs = json.loads(captured["asset_feed_spec"])
+    assert [b["text"] for b in afs["bodies"]] == ["Text A", "Text B"]
+    assert [t["text"] for t in afs["titles"]] == ["Titulek"]
+    assert [i["hash"] for i in afs["images"]] == ["h1", "h2"]
+    assert afs["link_urls"] == [{"website_url": "https://ex.cz"}]
+    assert afs["ad_formats"] == ["SINGLE_IMAGE"]
+    assert afs["call_to_action_types"] == ["LEARN_MORE"]
+    oss = json.loads(captured["object_story_spec"])
+    assert oss == {"page_id": "123"}
+    assert "degrees_of_freedom_spec" in captured  # no_enhancements=True
+
+
+def test_flex_video_variant(monkeypatch, capsys):
+    captured = _capture_create(monkeypatch, _flex_args(
+        image_hash=None, video_id=["v1", "v2"], video_thumbnail="https://ex.cz/t.jpg"))
+    afs = json.loads(captured["asset_feed_spec"])
+    assert afs["videos"] == [
+        {"video_id": "v1", "thumbnail_url": "https://ex.cz/t.jpg"},
+        {"video_id": "v2", "thumbnail_url": "https://ex.cz/t.jpg"},
+    ]
+    assert afs["ad_formats"] == ["SINGLE_VIDEO"]
+    assert "images" not in afs
+
+
+def test_flex_mixed_media_gets_both_ad_formats(monkeypatch, capsys):
+    captured = _capture_create(monkeypatch, _flex_args(video_id=["v1"]))
+    afs = json.loads(captured["asset_feed_spec"])
+    assert afs["ad_formats"] == ["SINGLE_IMAGE", "SINGLE_VIDEO"]
+
+
+def test_flex_ig_user_id_lands_in_object_story_spec(monkeypatch, capsys):
+    captured = _capture_create(monkeypatch, _flex_args(ig_user_id="998877"))
+    assert json.loads(captured["object_story_spec"])["instagram_user_id"] == "998877"
+
+
+def test_flex_page_only_without_dof_hints_pbia(monkeypatch, capsys):
+    _capture_create(monkeypatch, _flex_args(no_enhancements=False))
+    assert "1772103" in capsys.readouterr().err
+
+
+def test_flex_requires_media(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _capture_create(monkeypatch, _flex_args(image_hash=None, video_id=None))
+    assert "needs media" in capsys.readouterr().err
+
+
+def test_flex_rejects_more_than_five_texts(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _capture_create(monkeypatch, _flex_args(message=[f"T{i}" for i in range(6)]))
+    assert "max 5" in capsys.readouterr().err
+
+
+def test_flex_rejects_duplicate_hashes(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _capture_create(monkeypatch, _flex_args(image_hash=["h1", "h1"]))
+    assert "1815629" in capsys.readouterr().err
+
+
+def test_non_flex_rejects_repeated_message(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _capture_create(monkeypatch, _create_args(message=["A", "B"]))
+    assert "only supported with --type flex" in capsys.readouterr().err
+
+
+def test_single_string_args_still_work(monkeypatch, capsys):
+    """Backward compat: scripts passing plain strings (pre-append) keep working."""
+    captured = _capture_create(monkeypatch, _create_args(message="Hi", headline="H"))
+    link_data = json.loads(captured["object_story_spec"])["link_data"]
+    assert link_data["message"] == "Hi" and link_data["name"] == "H"
+
+
+# ---------------------------------------------------------------------------
+# creative-create --lead-gen-form-id (issue #3)
+# ---------------------------------------------------------------------------
+
+def test_lead_gen_link_creative_defaults_to_sign_up(monkeypatch, capsys):
+    captured = _capture_create(monkeypatch, _create_args(
+        lead_gen_form_id="42", link="http://fb.me/", call_to_action=None))
+    cta = json.loads(captured["object_story_spec"])["link_data"]["call_to_action"]
+    assert cta == {"type": "SIGN_UP", "value": {"lead_gen_form_id": "42"}}
+
+
+def test_lead_gen_video_creative_keeps_link_in_value(monkeypatch, capsys):
+    captured = _capture_create(monkeypatch, _create_args(
+        type="video", video_id="v9", lead_gen_form_id="42",
+        link="http://fb.me/", call_to_action="SUBSCRIBE"))
+    cta = json.loads(captured["object_story_spec"])["video_data"]["call_to_action"]
+    assert cta["type"] == "SUBSCRIBE"
+    assert cta["value"] == {"link": "http://fb.me/", "lead_gen_form_id": "42"}
+
+
+def test_lead_gen_requires_link_with_fbme_hint(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _capture_create(monkeypatch, _create_args(lead_gen_form_id="42", link=None))
+    err = capsys.readouterr().err
+    assert "2061015" in err and "fb.me" in err
+
+
+def test_lead_gen_rejected_on_flex(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _capture_create(monkeypatch, _flex_args(lead_gen_form_id="42"))
+    assert "link/video only" in capsys.readouterr().err

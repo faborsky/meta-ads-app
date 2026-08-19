@@ -20,6 +20,8 @@ Upload videos with `--wait` — a creative referencing a still-`processing` vide
 
 ## Text-only edit of an asset_feed_spec creative
 
+Creating a NEW asset_feed_spec creative from scratch needs no manual Python — use `creative-create --type flex` (repeatable `--message`/`--headline`/`--description`, multiple `--image-hash`/`--video-id`). The recipe below is for EDITING an existing one.
+
 Manual Python (the CLI has no text-edit command by design — too many variants). Import the engine and preserve everything except the texts:
 
 ```python

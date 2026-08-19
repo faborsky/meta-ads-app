@@ -1,18 +1,17 @@
 # Meta Ads App
 
-**Verze 2.3.0** · Python CLI pro správu Meta Ads (Facebook & Instagram) přes Marketing API v25.0 — stavěné pro orchestraci AI agentem (Claude Code) i pro vlastní automatizace.
+**Verze 2.4.0** · Python CLI pro správu Meta Ads (Facebook & Instagram) přes Marketing API v25.0 — stavěné pro orchestraci AI agentem (Claude Code) i pro vlastní automatizace.
 
 Appka vznikla jako součást ekosystému kurzu [AI First](https://aifirst.cz) — praktická ukázka, jak si marketér může nechat AI postavit a řídit vlastní nástroje. Novinky sleduj přes **Watch → Custom → Releases** na GitHubu, changelog je v [CHANGELOG.md](CHANGELOG.md).
 
-## 🆕 Co je nového (2.3.0)
+## 🆕 Co je nového (2.4.0)
 
-Verze z komunitní zpětné vazby — díky **Honzovi Kašemu** za tři skvěle zdokumentovaná GitHub issues (#1, #2, #3):
+Dokončení komunitní zpětné vazby od **Honzy Kašeho** (GitHub issues #1–#3; první část vyšla ve 2.3.0):
 
-- **`creative-clone` už neztrácí `url_tags`** (UTM parametry vč. dynamických maker) — klon je přenáší ze zdroje automaticky, `--url-tags` je přepíše. Dřív klon tiše vznikl bez měření a dry-run to nechytil.
-- **`--no-enhancements`** na `creative-create` / `creative-from-post` / `creative-from-ig` / `creative-clone` — vypne všech 14 Advantage+ enhancementů (`enroll_status: OPT_OUT`). Bez toho nové kreativy vznikají s defaultními automatickými úpravami Mety, což u klientských účtů nikdo neschválil.
-- **Chunked upload velkých videí**: `video-upload` nad 100 MB automaticky přepne na resumable upload po částech (`--chunked` vynutí) — jeden multipart POST na velkém souboru vracel HTTP 413 s prázdnou odpovědí. Chyba 413 má teď i srozumitelnou hlášku.
-- **Insights nahlas hlásí ořez**: `insights` varuje na stderr, když existují další řádky nad `--limit` (dřív tiše neúplná čísla u breakdownů na větších účtech), `insights-report` varuje při dosažení stropu 5000 řádků.
-- **Testy**: suite rozšířena na 64 testů; nové poznatky o API (413/chunked, PBIA u error 1772103, top-level `url_tags`) zapsány v [docs/api-notes.md](docs/api-notes.md).
+- **FLEX kreativa od nuly**: `creative-create --type flex` — nejsilnější typ kreativy na platformě (Meta míchá texty a média per impression). Opakovatelné `--message` / `--headline` / `--description` (max 5), více `--image-hash` a/nebo `--video-id`, `--ig-user-id` pro IG identitu (nebo `--no-enhancements` → page-backed identita, PBIA). Dosud šlo `asset_feed_spec` postavit jen klonem existující Advantage+ kreativy.
+- **Lead ads na úrovni kreativy**: `creative-create --lead-gen-form-id` (typ link/video) — lead formulář v CTA. Hlídá gotchu, že Meta vyžaduje i `--link` (error 2061015; placeholder `http://fb.me/` funguje).
+- Z 2.3.0: `creative-clone` přenáší `url_tags` (UTM), `--no-enhancements` (14 Advantage+ featur OPT_OUT), chunked upload videí > 100 MB, varování při ořezu insights.
+- **Testy**: suite rozšířena na 78 testů.
 
 Kompletní seznam změn: [CHANGELOG.md](CHANGELOG.md).
 
@@ -169,7 +168,7 @@ CLI parsuje limitové hlavičky po každém callu, persistuje usage do `.usage/`
 |---|---|
 | `creatives` | Výpis kreativ |
 | `creative-detail` | Detail vč. asset_feed_spec |
-| `creative-create` | Jednoduchá kreativa (link/video/photo/carousel; `--no-enhancements` vypne Advantage+ úpravy) |
+| `creative-create` | Kreativa link/video/photo/carousel/**flex** (flex = více textů a médií, opakovatelné flagy; `--lead-gen-form-id` pro lead ads; `--no-enhancements` vypne Advantage+ úpravy) |
 | `creative-clone` | Klon Advantage+ kreativy se swapem videa/obrázku/URL (přenáší `url_tags`; `--url-tags` přepíše, `--no-enhancements`) |
 | `creative-from-post` | Kreativa z existujícího FB postu (promoce organiky; `--no-enhancements`) |
 | `creative-from-ig` | Kreativa z IG postu/Reelu (promoce organiky; `--no-enhancements`) |

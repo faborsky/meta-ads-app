@@ -325,21 +325,26 @@ def build_parser() -> argparse.ArgumentParser:
     sp = _cmd(sub, "creative-detail", cmd_creative_detail, "Creative detail incl. asset_feed_spec")
     sp.add_argument("--creative-id", required=True)
 
-    sp = _cmd(sub, "creative-create", cmd_creative_create, "Create a simple creative (link/video/photo/carousel)", write=True)
+    sp = _cmd(sub, "creative-create", cmd_creative_create,
+              "Create a creative (link/video/photo/carousel/flex)", write=True)
     sp.add_argument("--name", required=True)
-    sp.add_argument("--type", required=True, choices=["link", "video", "photo", "carousel"])
+    sp.add_argument("--type", required=True, choices=["link", "video", "photo", "carousel", "flex"])
     sp.add_argument("--page-id", help="Facebook Page ID (default: META_PAGE_ID from .env)")
-    sp.add_argument("--message", help="Primary text")
+    sp.add_argument("--message", action="append", help="Primary text (repeat for --type flex, max 5)")
     sp.add_argument("--link", help="Landing page URL")
-    sp.add_argument("--headline", help="Ad headline")
-    sp.add_argument("--description", help="Ad description")
-    sp.add_argument("--image-hash", help="Image hash from image-upload")
+    sp.add_argument("--headline", action="append", help="Ad headline (repeat for --type flex, max 5)")
+    sp.add_argument("--description", action="append", help="Ad description (repeat for --type flex, max 5)")
+    sp.add_argument("--image-hash", action="append", help="Image hash from image-upload (repeat for --type flex)")
     sp.add_argument("--image-url", help="Image URL (alternative to hash)")
-    sp.add_argument("--video-id", help="Video ID from video-upload")
+    sp.add_argument("--video-id", action="append", help="Video ID from video-upload (repeat for --type flex)")
     sp.add_argument("--video-thumbnail", help="Video thumbnail URL")
     sp.add_argument("--call-to-action", help="CTA type (LEARN_MORE, SHOP_NOW, SIGN_UP, ...)")
     sp.add_argument("--child-attachments", help="JSON array for carousel")
     sp.add_argument("--url-tags", help="UTM parameters")
+    sp.add_argument("--lead-gen-form-id",
+                    help="Lead form ID → CTA value (link/video; requires --link, http://fb.me/ works)")
+    sp.add_argument("--ig-user-id",
+                    help="IG identity for flex (or use --no-enhancements → page-backed identity, PBIA)")
     sp.add_argument("--no-enhancements", action="store_true",
                     help="Opt out of all Advantage+ enhancements (14 features, enroll_status=OPT_OUT)")
 

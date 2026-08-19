@@ -1,6 +1,6 @@
 # Meta Ads App — CLI for the Meta Marketing API
 
-Python CLI for Facebook & Instagram ads via Marketing API **v25.0**. Version 2.3.0, 47 commands. Czech user docs in [README.md](README.md).
+Python CLI for Facebook & Instagram ads via Marketing API **v25.0**. Version 2.4.0, 47 commands. Czech user docs in [README.md](README.md).
 
 ## Setup
 

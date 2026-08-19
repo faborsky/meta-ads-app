@@ -77,17 +77,146 @@ def cmd_creative_detail(args) -> None:
         print(f"    {json.dumps(afs, indent=4, ensure_ascii=False)}")
 
 
+def _as_list(value) -> list:
+    """Normalize a repeatable argparse flag (None | str | list) to a list."""
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+# asset_feed_spec allows at most 5 bodies / titles / descriptions.
+AFS_TEXT_MAX = 5
+
+
+def _build_cta(cta_type: str | None, lead_form: str | None, link: str | None = None) -> dict | None:
+    """call_to_action dict or None. A lead form implies SIGN_UP unless overridden."""
+    if lead_form and not cta_type:
+        cta_type = "SIGN_UP"
+    if not cta_type:
+        return None
+    cta: dict = {"type": cta_type}
+    value: dict = {}
+    if link is not None:
+        value["link"] = link
+    if lead_form:
+        value["lead_gen_form_id"] = lead_form
+    if value:
+        cta["value"] = value
+    return cta
+
+
+def _build_flex_spec(args, page_id: str, messages: list, headlines: list,
+                     descriptions: list, image_hashes: list, video_ids: list) -> dict:
+    """object_story_spec + asset_feed_spec params for a FLEX creative.
+
+    FLEX = asset_feed_spec WITHOUT asset_customization_rules: Meta mixes the
+    supplied texts and media per impression. Identity: pass --ig-user-id, or
+    rely on --no-enhancements — a present degrees_of_freedom_spec makes Meta
+    fall back to the page-backed IG identity (PBIA) instead of error 1772103.
+    """
+    if not args.link:
+        _die("ERROR: --link required for flex creative.")
+    if not messages:
+        _die("ERROR: at least one --message required for flex creative.")
+    if not headlines:
+        _die("ERROR: at least one --headline required for flex creative.")
+    if not image_hashes and not video_ids:
+        _die("ERROR: flex creative needs media — --image-hash and/or --video-id (repeatable).")
+    for flag, vals in (("--message", messages), ("--headline", headlines),
+                       ("--description", descriptions)):
+        if len(vals) > AFS_TEXT_MAX:
+            _die(f"ERROR: {flag} given {len(vals)}× — asset_feed_spec allows max {AFS_TEXT_MAX}.")
+    for flag, vals in (("--image-hash", image_hashes), ("--video-id", video_ids)):
+        if len(set(vals)) != len(vals):
+            _die(f"ERROR: duplicate {flag} values — asset entries must be unique "
+                 "(error_subcode 1815629).")
+
+    afs: dict = {
+        "bodies": [{"text": t} for t in messages],
+        "titles": [{"text": t} for t in headlines],
+        "link_urls": [{"website_url": args.link}],
+    }
+    if descriptions:
+        afs["descriptions"] = [{"text": t} for t in descriptions]
+    if image_hashes:
+        afs["images"] = [{"hash": h} for h in image_hashes]
+    if video_ids:
+        videos = []
+        for vid in video_ids:
+            v: dict = {"video_id": vid}
+            if args.video_thumbnail:
+                v["thumbnail_url"] = args.video_thumbnail
+            videos.append(v)
+        afs["videos"] = videos
+    ad_formats = []
+    if image_hashes:
+        ad_formats.append("SINGLE_IMAGE")
+    if video_ids:
+        ad_formats.append("SINGLE_VIDEO")
+    afs["ad_formats"] = ad_formats
+    if args.call_to_action:
+        afs["call_to_action_types"] = [args.call_to_action]
+
+    oss: dict = {"page_id": page_id}
+    ig_user_id = getattr(args, "ig_user_id", None)
+    if ig_user_id:
+        oss["instagram_user_id"] = ig_user_id
+    elif not args.no_enhancements:
+        _err("⚠ flex with page-only identity: Meta may demand an Instagram identity "
+             "(error 1772103 / 'Select an Instagram account or a Facebook Page'). "
+             "Pass --ig-user-id, or --no-enhancements (a present degrees_of_freedom_spec "
+             "switches Meta to the page-backed IG identity, PBIA).")
+
+    return {"object_story_spec": json.dumps(oss), "asset_feed_spec": json.dumps(afs)}
+
+
 def cmd_creative_create(args) -> None:
-    """Create a new ad creative (dry-run/validate by default)."""
+    """Create a new ad creative (dry-run/validate by default).
+
+    Types: link/video/photo/carousel build object_story_spec; flex builds an
+    asset_feed_spec (multiple texts + media, no customization rules).
+    """
     account_id = account_of(args)
     page_id = args.page_id or api.META_PAGE_ID
 
     if not page_id:
         _die("ERROR: --page-id required (or set META_PAGE_ID in .env).")
 
-    lint.lint_texts(args.message, args.headline, args.description)
+    creative_type = args.type
+
+    # --message/--headline/--description/--image-hash/--video-id are repeatable
+    # (argparse append); multiple values only make sense for --type flex.
+    messages = _as_list(args.message)
+    headlines = _as_list(args.headline)
+    descriptions = _as_list(args.description)
+    image_hashes = _as_list(args.image_hash)
+    video_ids = _as_list(args.video_id)
+    if creative_type != "flex":
+        for flag, vals in (("--message", messages), ("--headline", headlines),
+                           ("--description", descriptions), ("--image-hash", image_hashes),
+                           ("--video-id", video_ids)):
+            if len(vals) > 1:
+                _die(f"ERROR: multiple {flag} values are only supported with --type flex.")
+    message = messages[0] if messages else None
+    headline = headlines[0] if headlines else None
+    description = descriptions[0] if descriptions else None
+    image_hash = image_hashes[0] if image_hashes else None
+    video_id = video_ids[0] if video_ids else None
+
+    for i in range(max(len(messages), len(headlines), len(descriptions), 1)):
+        lint.lint_texts(messages[i] if i < len(messages) else None,
+                        headlines[i] if i < len(headlines) else None,
+                        descriptions[i] if i < len(descriptions) else None)
     lint.lint_url(args.link)
     lint.lint_cta(args.call_to_action)
+
+    lead_form = getattr(args, "lead_gen_form_id", None)
+    if lead_form:
+        if creative_type not in ("link", "video"):
+            _die("ERROR: --lead-gen-form-id is supported for --type link/video only.")
+        if not args.link:
+            _die("ERROR: --lead-gen-form-id requires --link — Meta insists on a link even "
+                 "for lead forms (error 2061015). A placeholder like http://fb.me/ works.")
 
     params: dict = {"name": args.name}
     if args.url_tags:
@@ -95,40 +224,40 @@ def cmd_creative_create(args) -> None:
     if args.no_enhancements:
         params["degrees_of_freedom_spec"] = _no_enhancements_spec()
 
-    creative_type = args.type
-
     if creative_type == "link":
-        link_data: dict = {"link": args.link, "message": args.message or ""}
-        if args.headline:
-            link_data["name"] = args.headline
-        if args.description:
-            link_data["description"] = args.description
-        if args.image_hash:
-            link_data["image_hash"] = args.image_hash
+        link_data: dict = {"link": args.link, "message": message or ""}
+        if headline:
+            link_data["name"] = headline
+        if description:
+            link_data["description"] = description
+        if image_hash:
+            link_data["image_hash"] = image_hash
         elif args.image_url:
             link_data["picture"] = args.image_url
-        if args.call_to_action:
-            link_data["call_to_action"] = {"type": args.call_to_action}
+        cta = _build_cta(args.call_to_action, lead_form)
+        if cta:
+            link_data["call_to_action"] = cta
         params["object_story_spec"] = json.dumps({"page_id": page_id, "link_data": link_data})
 
     elif creative_type == "video":
-        if not args.video_id:
+        if not video_id:
             _die("ERROR: --video-id required for video creative.")
-        video_data: dict = {"video_id": args.video_id, "message": args.message or ""}
-        if args.headline:
-            video_data["title"] = args.headline
+        video_data: dict = {"video_id": video_id, "message": message or ""}
+        if headline:
+            video_data["title"] = headline
         if args.video_thumbnail:
             video_data["image_url"] = args.video_thumbnail
-        if args.call_to_action:
-            video_data["call_to_action"] = {"type": args.call_to_action, "value": {"link": args.link or ""}}
+        cta = _build_cta(args.call_to_action, lead_form, link=args.link or "")
+        if cta:
+            video_data["call_to_action"] = cta
         params["object_story_spec"] = json.dumps({"page_id": page_id, "video_data": video_data})
 
     elif creative_type == "photo":
-        if not args.image_hash:
+        if not image_hash:
             _die("ERROR: --image-hash required for photo creative.")
         params["object_story_spec"] = json.dumps({
             "page_id": page_id,
-            "photo_data": {"image_hash": args.image_hash, "message": args.message or ""},
+            "photo_data": {"image_hash": image_hash, "message": message or ""},
         })
 
     elif creative_type == "carousel":
@@ -138,12 +267,16 @@ def cmd_creative_create(args) -> None:
             _die("ERROR: --link required for carousel creative.")
         link_data_c: dict = {
             "link": args.link,
-            "message": args.message or "",
+            "message": message or "",
             "child_attachments": parse_json_arg(args.child_attachments, "--child-attachments"),
         }
         if args.call_to_action:
             link_data_c["call_to_action"] = {"type": args.call_to_action}
         params["object_story_spec"] = json.dumps({"page_id": page_id, "link_data": link_data_c})
+
+    elif creative_type == "flex":
+        params.update(_build_flex_spec(args, page_id, messages, headlines,
+                                       descriptions, image_hashes, video_ids))
     else:
         _die(f"ERROR: Unknown creative type: {creative_type}")
 

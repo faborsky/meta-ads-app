@@ -2,6 +2,18 @@
 
 Všechny podstatné změny v tomto projektu. Formát vychází z [Keep a Changelog](https://keepachangelog.com/), verzování je [SemVer](https://semver.org/) (verze žije v `metaads/__init__.py`).
 
+## [2.4.0] — 2026-08-19 — FLEX kreativa od nuly + lead ads 🧩
+
+Dokončení issue #3 od **Honzy Kašeho** — zbývající dva náměty z produkce.
+
+### Přidáno
+- **`creative-create --type flex`**: FLEX kreativa (asset_feed_spec bez customization rules — Meta míchá texty a média per impression) postavená od nuly, s lokálním lintem textů. `--message`/`--headline`/`--description` jsou nově opakovatelné (pro flex, max 5 dle limitu asset_feed_spec), stejně jako `--image-hash`/`--video-id` (média lze kombinovat; `ad_formats` se odvodí). `--ig-user-id` doplní IG identitu; bez ní CLI poradí PBIA cestu (`--no-enhancements` → přítomný `degrees_of_freedom_spec` → Meta použije page-backed IG identitu místo erroru 1772103). Duplicitní hashe/ID odmítne lokálně (subcode 1815629). U ostatních typů dají opakované flagy čistou chybu; jednoduché stringy zůstávají zpětně kompatibilní pro skripty importující `cmd_creative_create`.
+- **`creative-create --lead-gen-form-id`** (typ link/video): lead formulář v `call_to_action.value.lead_gen_form_id`; bez `--call-to-action` se použije `SIGN_UP`. Vyžaduje `--link` — Meta na lead kreativě link vynucuje (error 2061015), placeholder `http://fb.me/` funguje; CLI to hlídá lokálně s nápovědou.
+- `docs/api-notes.md`: FLEX payload recept, lead-gen sekce (2061015 + fb.me).
+
+### Testy
+- 64 → **78 testů** (flex asset_feed_spec obrázek/video/mix, limity a duplicity, PBIA hint, lead-gen CTA link/video, zpětná kompatibilita string flagů).
+
 ## [2.3.0] — 2026-08-19 — Komunitní zpětná vazba: url_tags, enhancementy, velká videa 🤝
 
 První verze postavená na komunitních GitHub issues — díky **Honzovi Kašemu** (@HonzaKase) za issues #1, #2 a #3 včetně živě ověřených poznatků z produkce.

@@ -94,7 +94,7 @@ Command reference: `<META_APP_DIR>/README.md` (full flag tables) and `<META_APP_
 ## Scenario 6: MANAGE CREATIVES
 
 1. `ads --campaign-id ... --json` + `creative-detail --creative-id ...` to map what runs.
-2. Simple creative → `creative-create` (`--no-enhancements` = all 14 Advantage+ features OPT_OUT). Advantage+ media/URL swap → `creative-clone` (carries url_tags/UTM, handles unique-image-hash and deprecated degrees_of_freedom_spec automatically; `--swap-on-ad` swaps in one step).
+2. Simple creative → `creative-create` (`--no-enhancements` = all 14 Advantage+ features OPT_OUT). FLEX creative from scratch → `creative-create --type flex` with repeated `--message`/`--headline` (max 5) and repeated `--image-hash`/`--video-id`; identity via `--ig-user-id` or `--no-enhancements` (PBIA). Lead ads → `--lead-gen-form-id` (link/video; requires `--link`, `http://fb.me/` works). Advantage+ media/URL swap → `creative-clone` (carries url_tags/UTM, handles unique-image-hash and deprecated degrees_of_freedom_spec automatically; `--swap-on-ad` swaps in one step).
 3. Text edits inside asset_feed_spec → read `meta-creative-editing.md` (in this skill folder) for the full preservation rules.
 4. After any swap: re-review runs — check `ad-review`.
 
