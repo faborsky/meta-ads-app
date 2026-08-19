@@ -286,3 +286,40 @@ def test_budget_guard_passes_and_caches_offset100_currency(monkeypatch):
     api.budget_currency_guard("act_1000000")
     api.budget_currency_guard("act_1000000")  # second call served from cache
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Idempotent-write retry opt-in (chunked upload transfer)
+# ---------------------------------------------------------------------------
+
+def test_transient_post_retried_when_explicitly_idempotent(monkeypatch, dummy_resp):
+    calls = []
+
+    def fake_post(url, data=None, headers=None, timeout=None, files=None):
+        calls.append(1)
+        if len(calls) == 1:
+            return _transient_error_resp(dummy_resp)
+        return dummy_resp({"start_offset": "100", "end_offset": "100"})
+
+    monkeypatch.setattr(api.requests, "post", fake_post)
+    data = api._api_call("POST", "act_1000000/advideos",
+                         {"upload_phase": "transfer"}, retry_transient_writes=True)
+    assert len(calls) == 2
+    assert data["start_offset"] == "100"
+
+
+def test_non_json_413_explains_payload_too_large(monkeypatch, capsys):
+    class Raw:
+        headers = {}
+        status_code = 413
+        text = ""
+
+        def json(self):
+            raise json.JSONDecodeError("x", "", 0)
+
+    monkeypatch.setattr(api.requests, "post", lambda *a, **k: Raw())
+    with pytest.raises(SystemExit):
+        api._api_call("POST", "act_1000000/advideos", {})
+    err = capsys.readouterr().err
+    assert "413" in err
+    assert "too large" in err

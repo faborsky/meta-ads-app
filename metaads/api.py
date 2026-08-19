@@ -315,6 +315,7 @@ def _api_call(
     timeout: int = 60,
     _retry: int = 0,
     _skip_guard: bool = False,
+    retry_transient_writes: bool = False,
 ) -> dict:
     """Make a Meta Marketing API call.
 
@@ -322,6 +323,9 @@ def _api_call(
     endpoint: API path (e.g., 'act_123/campaigns' or '12345') or a full URL
     params: query params for GET, form data for POST
     files: multipart files for upload
+    retry_transient_writes: allow transient-error retries on POST — ONLY for
+        idempotent writes (chunked upload transfer: the server tracks offsets,
+        so re-sending a chunk cannot duplicate anything)
 
     The token travels in the Authorization header, never in the URL — so it
     can't leak through exception text, proxy logs or pagination links.
@@ -365,6 +369,8 @@ def _api_call(
         data = resp.json()
     except json.JSONDecodeError:
         _err(f"ERROR: Non-JSON response from {method} {endpoint} (HTTP {resp.status_code})")
+        if resp.status_code == 413:
+            _err("  Payload too large — the file exceeds the single-request upload limit.")
         _die(resp.text[:500])
 
     error = data.get("error")
@@ -409,7 +415,8 @@ def _api_call(
                     )
                 _err(f"Rate limited (code {code}), waiting {delay}s (retry {_retry + 1}/{len(_RETRY_DELAYS)})...")
                 time.sleep(delay)
-                return _api_call(method, endpoint, params, files, timeout, _retry + 1)
+                return _api_call(method, endpoint, params, files, timeout, _retry + 1,
+                                 retry_transient_writes=retry_transient_writes)
             _die(f"ERROR: Rate limit exceeded after {len(_RETRY_DELAYS)} retries: {message}")
 
         # QPS limit (613 / subcode 5044001)
@@ -418,7 +425,8 @@ def _api_call(
                 delay = _RETRY_DELAYS[_retry]
                 _err(f"QPS limit hit, waiting {delay}s (retry {_retry + 1})...")
                 time.sleep(delay)
-                return _api_call(method, endpoint, params, files, timeout, _retry + 1)
+                return _api_call(method, endpoint, params, files, timeout, _retry + 1,
+                                 retry_transient_writes=retry_transient_writes)
 
         # Budget change limits
         if code == 613 and subcode == 1487632:
@@ -426,13 +434,15 @@ def _api_call(
 
         # Transient errors — auto-retry READS only. Meta occasionally reports
         # is_transient AFTER a write actually landed; blindly re-sending a
-        # POST can create the campaign/ad/copy twice.
+        # POST can create the campaign/ad/copy twice. Idempotent writes
+        # (chunked upload transfer) opt in via retry_transient_writes.
         if is_transient:
-            if method == "GET" and _retry < 3:
+            if (method == "GET" or retry_transient_writes) and _retry < 3:
                 delay = [2, 5, 15][_retry]
                 _err(f"Transient error, retrying in {delay}s...")
                 time.sleep(delay)
-                return _api_call(method, endpoint, params, files, timeout, _retry + 1)
+                return _api_call(method, endpoint, params, files, timeout, _retry + 1,
+                                 retry_transient_writes=retry_transient_writes)
             if method != "GET":
                 _err(f"ERROR: Transient error from Meta on {method} {_redact(endpoint)}: {message}")
                 _die(

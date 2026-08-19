@@ -1,17 +1,18 @@
 # Meta Ads App
 
-**Verze 2.2.0** · Python CLI pro správu Meta Ads (Facebook & Instagram) přes Marketing API v25.0 — stavěné pro orchestraci AI agentem (Claude Code) i pro vlastní automatizace.
+**Verze 2.3.0** · Python CLI pro správu Meta Ads (Facebook & Instagram) přes Marketing API v25.0 — stavěné pro orchestraci AI agentem (Claude Code) i pro vlastní automatizace.
 
 Appka vznikla jako součást ekosystému kurzu [AI First](https://aifirst.cz) — praktická ukázka, jak si marketér může nechat AI postavit a řídit vlastní nástroje. Novinky sleduj přes **Watch → Custom → Releases** na GitHubu, changelog je v [CHANGELOG.md](CHANGELOG.md).
 
-## 🆕 Co je nového (2.2.0)
+## 🆕 Co je nového (2.3.0)
 
-- **Bezpečnostní vylepšení**: token cestuje v `Authorization` hlavičce (ne v URL), chybové hlášky redigují tajemství, `token-extend` posílá app secret v těle requestu a `.env` zapisuje atomicky s právy 600.
-- **Spolehlivější ochrana účtu**: rate-limit guard správně vyhodnocuje víc BUC záznamů najednou, blokuje per účet (horký účet A neblokuje účet B) a nečeká slepě desítky minut. Zápisy (POST) se při „transient" chybě neopakují — žádné duplicitní kampaně.
-- **Aktualizace na stav API 2026**: atribuční okna `7d_view`/`28d_view` Meta zrušila (API na ně vrací tiché nuly) — CLI je odmítne s vysvětlením; přidáno okno `1d_ev`.
-- **Přívětivější chyby**: `--help`/`--version` fungují i před vyplněním `.env`, nevalidní JSON ve flazích a `--genders male` dají čistou hlášku místo tracebacku, `*-delete --json` vrací validní JSON i v dry-runu.
-- **Ochrana měn bez haléřů** (JPY, HUF, …): CLI odmítne nastavovat rozpočty na účtech, kde by převod ×100 nastavil 100× vyšší částku.
-- **Testy**: `tests/` s pytest suite (45 testů) pokrývající bezpečnostní a ochranné mechanismy.
+Verze z komunitní zpětné vazby — díky **Honzovi Kašemu** za tři skvěle zdokumentovaná GitHub issues (#1, #2, #3):
+
+- **`creative-clone` už neztrácí `url_tags`** (UTM parametry vč. dynamických maker) — klon je přenáší ze zdroje automaticky, `--url-tags` je přepíše. Dřív klon tiše vznikl bez měření a dry-run to nechytil.
+- **`--no-enhancements`** na `creative-create` / `creative-from-post` / `creative-from-ig` / `creative-clone` — vypne všech 14 Advantage+ enhancementů (`enroll_status: OPT_OUT`). Bez toho nové kreativy vznikají s defaultními automatickými úpravami Mety, což u klientských účtů nikdo neschválil.
+- **Chunked upload velkých videí**: `video-upload` nad 100 MB automaticky přepne na resumable upload po částech (`--chunked` vynutí) — jeden multipart POST na velkém souboru vracel HTTP 413 s prázdnou odpovědí. Chyba 413 má teď i srozumitelnou hlášku.
+- **Insights nahlas hlásí ořez**: `insights` varuje na stderr, když existují další řádky nad `--limit` (dřív tiše neúplná čísla u breakdownů na větších účtech), `insights-report` varuje při dosažení stropu 5000 řádků.
+- **Testy**: suite rozšířena na 64 testů; nové poznatky o API (413/chunked, PBIA u error 1772103, top-level `url_tags`) zapsány v [docs/api-notes.md](docs/api-notes.md).
 
 Kompletní seznam změn: [CHANGELOG.md](CHANGELOG.md).
 
@@ -168,22 +169,22 @@ CLI parsuje limitové hlavičky po každém callu, persistuje usage do `.usage/`
 |---|---|
 | `creatives` | Výpis kreativ |
 | `creative-detail` | Detail vč. asset_feed_spec |
-| `creative-create` | Jednoduchá kreativa (link/video/photo/carousel) |
-| `creative-clone` | Klon Advantage+ kreativy se swapem videa/obrázku/URL |
-| `creative-from-post` | Kreativa z existujícího FB postu (promoce organiky) |
-| `creative-from-ig` | Kreativa z IG postu/Reelu (promoce organiky) |
+| `creative-create` | Jednoduchá kreativa (link/video/photo/carousel; `--no-enhancements` vypne Advantage+ úpravy) |
+| `creative-clone` | Klon Advantage+ kreativy se swapem videa/obrázku/URL (přenáší `url_tags`; `--url-tags` přepíše, `--no-enhancements`) |
+| `creative-from-post` | Kreativa z existujícího FB postu (promoce organiky; `--no-enhancements`) |
+| `creative-from-ig` | Kreativa z IG postu/Reelu (promoce organiky; `--no-enhancements`) |
 | `ig-media` | Výpis IG médií page-connected účtu |
 | `preview` | HTML náhled reklamy/kreativy (`--format`, `--out soubor.html`) |
 | `creative-delete` | Trvalé smazání kreativy (bez PAUSED brzdy — kreativy status nemají; použitou odmítne Meta) |
 | `image-upload` | Upload obrázku → hash (s lint kontrolou rozměrů; **zapisuje rovnou**, bez dry-runu — plní jen knihovnu médií) |
-| `video-upload` | Upload videa → ID (`--wait` počká na zpracování; **zapisuje rovnou** — plní jen knihovnu médií) |
+| `video-upload` | Upload videa → ID (`--wait` počká na zpracování; > 100 MB automaticky chunked, `--chunked` vynutí; **zapisuje rovnou** — plní jen knihovnu médií) |
 
 ### Insights & analýza
 
 | Příkaz | Popis |
 |---|---|
-| `insights` | Výkonová data (breakdowny vč. asset, atribuce `1d_click`/`7d_click`/`28d_click`/`1d_view`/`1d_ev`, filtering, sort) |
-| `insights-report` | Async report pro velké dotazy |
+| `insights` | Výkonová data (breakdowny vč. asset, atribuce `1d_click`/`7d_click`/`28d_click`/`1d_view`/`1d_ev`, filtering, sort; varuje při ořezu nad `--limit`) |
+| `insights-report` | Async report pro velké dotazy (varuje při dosažení stropu 5000 řádků) |
 | `pulse` | Digest účtu: delty, movery, review, limity, token (`--days`) |
 | `activities` | Historie změn účtu (`--since`, `--category`, `--object-id`) |
 

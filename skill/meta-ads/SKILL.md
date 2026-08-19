@@ -60,8 +60,8 @@ Command reference: `<META_APP_DIR>/README.md` (full flag tables) and `<META_APP_
 3. Execute bottom-up, dry-run then `--confirm` each step:
    - `campaign-create --name ... --objective OUTCOME_... --daily-budget ...` (CBO: budget on campaign; then `adset-create --cbo`)
    - `adset-create --campaign-id ... --countries CZ --optimization-goal ...` (+ `--advantage-audience 1` unless the user wants manual audiences; add `--dsa-payor/--dsa-beneficiary` for EU)
-   - `image-upload --file ...` / `video-upload --file ... --wait`
-   - `creative-create --type link ... --page-id ...`
+   - `image-upload --file ...` / `video-upload --file ... --wait` (files > 100 MB upload chunked automatically)
+   - `creative-create --type link ... --page-id ...` (ask whether Advantage+ enhancements are wanted — `--no-enhancements` opts out of all 14; without it Meta's defaults apply, typically ON)
    - `ad-create --adset-id ... --creative-id ...`
 4. Verify: `preview --ad-id ... --out preview.html`, then `ad-review --ad-id ...`. Activation only on explicit request.
 
@@ -88,12 +88,13 @@ Command reference: `<META_APP_DIR>/README.md` (full flag tables) and `<META_APP_
 
 - **Facebook post**: `creative-from-post --post-id <PAGEID_POSTID> --name ...` (optional `--call-to-action LEARN_MORE --link ...`), then `ad-create`.
 - **Instagram post/Reel**: `ig-media` to list media with IDs → `creative-from-ig --media-id ... --name ...` → `ad-create`. Media with copyrighted music can't be boosted.
+- Both take `--no-enhancements` when Meta's automatic Advantage+ edits are unwanted (default: Meta's defaults, typically ON).
 - Preview before going anywhere near ACTIVE: `preview --creative-id ... --format INSTAGRAM_STANDARD --out preview.html`.
 
 ## Scenario 6: MANAGE CREATIVES
 
 1. `ads --campaign-id ... --json` + `creative-detail --creative-id ...` to map what runs.
-2. Simple creative → `creative-create`. Advantage+ media/URL swap → `creative-clone` (handles unique-image-hash and deprecated degrees_of_freedom_spec automatically; `--swap-on-ad` swaps in one step).
+2. Simple creative → `creative-create` (`--no-enhancements` = all 14 Advantage+ features OPT_OUT). Advantage+ media/URL swap → `creative-clone` (carries url_tags/UTM, handles unique-image-hash and deprecated degrees_of_freedom_spec automatically; `--swap-on-ad` swaps in one step).
 3. Text edits inside asset_feed_spec → read `meta-creative-editing.md` (in this skill folder) for the full preservation rules.
 4. After any swap: re-review runs — check `ad-review`.
 

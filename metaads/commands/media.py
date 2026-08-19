@@ -67,6 +67,65 @@ def _wait_video_ready(video_id: str, timeout: int = 300, interval: int = 6) -> s
     return status
 
 
+# Single multipart POST returns HTTP 413 somewhere above ~200 MB (observed
+# live at 234 MB) — switch to the resumable chunked upload well below that.
+CHUNKED_THRESHOLD_MB = 100
+
+
+def _upload_video_multipart(account_id: str, file_path: str, params: dict) -> dict:
+    """Small files: one multipart POST."""
+    with open(file_path, "rb") as f:
+        return api._api_call(
+            "POST",
+            f"{account_id}/advideos",
+            params,
+            files={"source": (os.path.basename(file_path), f)},
+            timeout=300,
+        )
+
+
+def _upload_video_chunked(account_id: str, file_path: str, params: dict) -> dict:
+    """Large files: resumable upload (upload_phase start/transfer/finish).
+
+    The server dictates chunk boundaries via returned start/end offsets.
+    Transfer chunks are idempotent (offset-addressed), so transient errors
+    retry safely — unlike every other write in this CLI.
+    """
+    file_size = os.path.getsize(file_path)
+    filename = os.path.basename(file_path)
+
+    session = api._api_call("POST", f"{account_id}/advideos", {
+        "upload_phase": "start", "file_size": file_size,
+    })
+    session_id = session.get("upload_session_id")
+    video_id = session.get("video_id", "")
+    if not session_id:
+        _die(f"ERROR: Chunked upload start returned no upload_session_id: {json.dumps(session)}")
+
+    start, end = int(session.get("start_offset", 0)), int(session.get("end_offset", 0))
+    with open(file_path, "rb") as f:
+        while start < end:
+            f.seek(start)
+            chunk = f.read(end - start)
+            _err(f"  chunk {start / 1024 / 1024:.0f}–{end / 1024 / 1024:.0f} MB "
+                 f"of {file_size / 1024 / 1024:.0f} MB")
+            resp = api._api_call(
+                "POST",
+                f"{account_id}/advideos",
+                {"upload_phase": "transfer", "upload_session_id": session_id,
+                 "start_offset": start},
+                files={"video_file_chunk": (filename, chunk)},
+                timeout=300,
+                retry_transient_writes=True,
+            )
+            start, end = int(resp.get("start_offset", end)), int(resp.get("end_offset", end))
+
+    finish = api._api_call("POST", f"{account_id}/advideos", {
+        "upload_phase": "finish", "upload_session_id": session_id, **params,
+    })
+    return {"id": video_id, "success": finish.get("success")}
+
+
 def cmd_video_upload(args) -> None:
     """Upload video file, returns video ID."""
     account_id = account_of(args)
@@ -75,20 +134,18 @@ def cmd_video_upload(args) -> None:
         _die(f"ERROR: File not found: {args.file}")
 
     file_size = os.path.getsize(args.file)
-    _err(f"Uploading {os.path.basename(args.file)} ({file_size / 1024 / 1024:.1f} MB)...")
+    use_chunked = args.chunked or file_size > CHUNKED_THRESHOLD_MB * 1024 * 1024
+    _err(f"Uploading {os.path.basename(args.file)} ({file_size / 1024 / 1024:.1f} MB, "
+         f"{'chunked' if use_chunked else 'single request'})...")
 
     params: dict = {}
     if args.title:
         params["title"] = args.title
 
-    with open(args.file, "rb") as f:
-        data = api._api_call(
-            "POST",
-            f"{account_id}/advideos",
-            params,
-            files={"source": (os.path.basename(args.file), f)},
-            timeout=300,
-        )
+    if use_chunked:
+        data = _upload_video_chunked(account_id, args.file, params)
+    else:
+        data = _upload_video_multipart(account_id, args.file, params)
 
     video_id = data.get("id", "")
     final_status = None

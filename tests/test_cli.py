@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 
+from metaads import __version__
+
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLI = os.path.join(APP_DIR, "meta_ads_cli.py")
 
@@ -28,7 +30,7 @@ def test_help_works_without_configured_env():
 def test_version_works_without_configured_env():
     r = _run("--version")
     assert r.returncode == 0
-    assert "2.2.0" in r.stdout
+    assert __version__ in r.stdout
 
 
 def test_subcommand_help_works_without_configured_env():

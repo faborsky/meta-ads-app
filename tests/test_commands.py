@@ -146,3 +146,162 @@ def test_format_insight_value_never_crashes():
     assert f("impressions", "not-a-number") == "not-a-number"
     assert "?" in f("actions", [{"action_type": "lead"}])  # missing 'value' key
     assert f("cost_per_action_type", [{"action_type": "lead", "value": None}])
+
+
+# ---------------------------------------------------------------------------
+# creative-clone: url_tags carry-over, enhancement opt-out (issues #1, #2)
+# ---------------------------------------------------------------------------
+
+def _clone_args(**over):
+    base = dict(creative_id="777", name="Clone", swap_video=None, swap_thumbnail=None,
+                swap_image=None, new_url=None, url_tags=None, no_enhancements=False,
+                swap_on_ad=None, confirm=False, json=True, account_id=None)
+    base.update(over)
+    return Namespace(**base)
+
+
+def _clone_source(**over):
+    base = {
+        "object_story_spec": {"page_id": "1"},
+        "asset_feed_spec": {"images": [{"hash": "abc"}]},
+        "url_tags": "utm_source=fb&utm_content={{ad.name}}",
+    }
+    base.update(over)
+    return base
+
+
+def _run_clone(monkeypatch, source, args):
+    captured = {}
+    monkeypatch.setattr(api, "_api_call", lambda m, e, p=None, **k: source)
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_clone(args)
+    return captured
+
+
+def test_clone_reads_and_carries_url_tags(monkeypatch, capsys):
+    fields_seen = {}
+
+    def fake_get(method, endpoint, params=None, **k):
+        fields_seen.update(params or {})
+        return _clone_source()
+
+    captured = {}
+    monkeypatch.setattr(api, "_api_call", fake_get)
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_clone(_clone_args())
+    assert "url_tags" in fields_seen["fields"]
+    assert captured["url_tags"] == "utm_source=fb&utm_content={{ad.name}}"
+
+
+def test_clone_url_tags_flag_overrides_source(monkeypatch, capsys):
+    captured = _run_clone(monkeypatch, _clone_source(),
+                          _clone_args(url_tags="utm_source=override"))
+    assert captured["url_tags"] == "utm_source=override"
+
+
+def test_clone_without_source_url_tags_omits_key(monkeypatch, capsys):
+    captured = _run_clone(monkeypatch, _clone_source(url_tags=None), _clone_args())
+    assert "url_tags" not in captured
+
+
+def test_clone_no_enhancements_replaces_source_dof(monkeypatch, capsys):
+    source = _clone_source(degrees_of_freedom_spec={
+        "creative_features_spec": {"image_touchups": {"enroll_status": "OPT_IN"}}})
+    captured = _run_clone(monkeypatch, source, _clone_args(no_enhancements=True))
+    spec = json.loads(captured["degrees_of_freedom_spec"])["creative_features_spec"]
+    assert all(v == {"enroll_status": "OPT_OUT"} for v in spec.values())
+    assert len(spec) == len(creatives.ENHANCEMENT_FEATURES)
+
+
+def test_clone_preserves_source_dof_by_default(monkeypatch, capsys):
+    source = _clone_source(degrees_of_freedom_spec={
+        "creative_features_spec": {"image_touchups": {"enroll_status": "OPT_IN"}}})
+    captured = _run_clone(monkeypatch, source, _clone_args())
+    spec = json.loads(captured["degrees_of_freedom_spec"])["creative_features_spec"]
+    assert spec["image_touchups"] == {"enroll_status": "OPT_IN"}
+
+
+# ---------------------------------------------------------------------------
+# creative-create / from-post / from-ig: --no-enhancements (issue #2)
+# ---------------------------------------------------------------------------
+
+def _create_args(**over):
+    base = dict(name="C", type="link", page_id="123", message="Hi", link="https://ex.cz",
+                headline=None, description=None, image_hash=None, image_url=None,
+                video_id=None, video_thumbnail=None, call_to_action=None,
+                child_attachments=None, url_tags=None, no_enhancements=False,
+                confirm=False, json=True, account_id=None)
+    base.update(over)
+    return Namespace(**base)
+
+
+def test_enhancement_feature_list_is_the_14_opt_out_set():
+    assert len(creatives.ENHANCEMENT_FEATURES) == 14
+    assert len(set(creatives.ENHANCEMENT_FEATURES)) == 14
+    # deprecated features the API rejects on create must never be sent
+    assert not set(creatives.ENHANCEMENT_FEATURES) & set(creatives._DOF_DEPRECATED)
+
+
+def test_creative_create_no_enhancements_sends_full_opt_out(monkeypatch, capsys):
+    captured = {}
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_create(_create_args(no_enhancements=True))
+    spec = json.loads(captured["degrees_of_freedom_spec"])["creative_features_spec"]
+    assert set(spec) == set(creatives.ENHANCEMENT_FEATURES)
+    assert all(v == {"enroll_status": "OPT_OUT"} for v in spec.values())
+
+
+def test_creative_create_default_sends_no_dof(monkeypatch, capsys):
+    captured = {}
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_create(_create_args())
+    assert "degrees_of_freedom_spec" not in captured
+
+
+def test_creative_from_post_no_enhancements(monkeypatch, capsys):
+    captured = {}
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_from_post(Namespace(
+        post_id="1_2", page_id=None, name="P", call_to_action=None, link=None,
+        no_enhancements=True, confirm=False, json=True, account_id=None))
+    assert "degrees_of_freedom_spec" in captured
+
+
+def test_creative_from_ig_no_enhancements(monkeypatch, capsys):
+    captured = {}
+    monkeypatch.setattr(api, "mutate",
+                        lambda endpoint, params, confirm, **k: captured.update(params) or ({}, False))
+    creatives.cmd_creative_from_ig(Namespace(
+        media_id="55", page_id="123", ig_user_id="99", name="I", call_to_action=None,
+        link=None, no_enhancements=True, confirm=False, json=True, account_id=None))
+    assert "degrees_of_freedom_spec" in captured
+
+
+# ---------------------------------------------------------------------------
+# insights: loud truncation instead of silently incomplete numbers (issue #3)
+# ---------------------------------------------------------------------------
+
+def test_insights_warns_on_paging_next(monkeypatch, capsys):
+    monkeypatch.setattr(api, "_api_call", lambda *a, **k: {
+        "data": [{"spend": "1"}],
+        "paging": {"cursors": {}, "next": "https://graph.facebook.com/next"},
+    })
+    insights.cmd_insights(_insight_args(object_id=None, json=True, limit=100,
+                                        account_id=None))
+    captured = capsys.readouterr()
+    assert "Truncated" in captured.err
+    assert json.loads(captured.out) == [{"spend": "1"}]  # stdout stays clean JSON
+
+
+def test_insights_no_warning_without_paging_next(monkeypatch, capsys):
+    monkeypatch.setattr(api, "_api_call", lambda *a, **k: {
+        "data": [{"spend": "1"}], "paging": {"cursors": {}},
+    })
+    insights.cmd_insights(_insight_args(object_id=None, json=True, limit=100,
+                                        account_id=None))
+    assert "Truncated" not in capsys.readouterr().err

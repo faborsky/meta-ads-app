@@ -340,6 +340,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--call-to-action", help="CTA type (LEARN_MORE, SHOP_NOW, SIGN_UP, ...)")
     sp.add_argument("--child-attachments", help="JSON array for carousel")
     sp.add_argument("--url-tags", help="UTM parameters")
+    sp.add_argument("--no-enhancements", action="store_true",
+                    help="Opt out of all Advantage+ enhancements (14 features, enroll_status=OPT_OUT)")
 
     sp = _cmd(sub, "creative-clone", cmd_creative_clone,
               "Clone an Advantage+ creative, swapping video/image/URL", write=True)
@@ -349,6 +351,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--swap-thumbnail", help="New video thumbnail image hash (with --swap-video)")
     sp.add_argument("--swap-image", help="New fallback image hash (collapses images[] to one entry)")
     sp.add_argument("--new-url", help="New landing page URL (replaces website_url in link_urls[])")
+    sp.add_argument("--url-tags", help="Override URL tags (default: carried over from the source creative)")
+    sp.add_argument("--no-enhancements", action="store_true",
+                    help="Replace source enhancement spec with full opt-out (14 features OPT_OUT)")
     sp.add_argument("--swap-on-ad", help="Ad ID to point at the new creative (triggers re-review)")
 
     sp = _cmd(sub, "creative-from-post", cmd_creative_from_post,
@@ -358,6 +363,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--name", required=True)
     sp.add_argument("--call-to-action", help="Optional CTA type")
     sp.add_argument("--link", help="CTA landing URL")
+    sp.add_argument("--no-enhancements", action="store_true",
+                    help="Opt out of all Advantage+ enhancements (14 features, enroll_status=OPT_OUT)")
 
     sp = _cmd(sub, "creative-from-ig", cmd_creative_from_ig,
               "Creative from an existing IG post/Reel (boost organic)", write=True)
@@ -367,6 +374,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--name", required=True)
     sp.add_argument("--call-to-action", help="Optional CTA type")
     sp.add_argument("--link", help="CTA landing URL")
+    sp.add_argument("--no-enhancements", action="store_true",
+                    help="Opt out of all Advantage+ enhancements (14 features, enroll_status=OPT_OUT)")
 
     sp = _cmd(sub, "ig-media", cmd_ig_media, "List IG media of the page-connected account")
     sp.add_argument("--page-id", help="Page ID (default META_PAGE_ID)")
@@ -392,6 +401,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = _cmd(sub, "video-upload", cmd_video_upload, "Upload video, returns ID (direct write)")
     sp.add_argument("--file", required=True, help="Path to video file")
     sp.add_argument("--title", help="Video title")
+    sp.add_argument("--chunked", action="store_true",
+                    help="Force resumable chunked upload (automatic for files > 100 MB)")
     sp.add_argument("--wait", action="store_true",
                     help="Poll until processing is 'ready' (needed before using in a creative)")
     sp.add_argument("--wait-timeout", type=int, default=300, help="Max seconds to wait (default 300)")

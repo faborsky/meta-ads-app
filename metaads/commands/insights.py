@@ -30,6 +30,9 @@ ATTRIBUTION_WINDOWS = [
 ]
 _REMOVED_WINDOWS = {"7d_view", "28d_view"}
 
+# insights-report fetches at most this many rows (paginated 500/page).
+REPORT_ROW_CAP = 5000
+
 
 def _format_insight_value(key: str, value: object) -> str:
     """Format insight metric value for human display (never crash on API shape)."""
@@ -106,6 +109,12 @@ def cmd_insights(args) -> None:
     data = api._api_call("GET", f"{object_id}/insights", params)
     rows = data.get("data", [])
 
+    # A paging.next link means more rows exist than --limit returned — say so
+    # loudly (stderr, so --json stdout stays a clean row array).
+    if (data.get("paging") or {}).get("next"):
+        _err(f"⚠ Truncated: more rows exist beyond --limit {args.limit} (paging.next present). "
+             "Raise --limit or use insights-report for large queries.")
+
     if args.json:
         _output_json(rows)
         return
@@ -181,7 +190,10 @@ def cmd_insights_report(args) -> None:
     else:
         _die("ERROR: Report timed out after 10 minutes.")
 
-    results = api._paginate(f"{report_run_id}/insights", {"limit": 500}, max_items=5000)
+    results = api._paginate(f"{report_run_id}/insights", {"limit": 500}, max_items=REPORT_ROW_CAP)
+    if len(results) >= REPORT_ROW_CAP:
+        _err(f"⚠ Row cap {REPORT_ROW_CAP} reached — results may be truncated. "
+             "Narrow the query (date range, level, filtering).")
 
     if args.json:
         _output_json(results)

@@ -2,6 +2,25 @@
 
 Všechny podstatné změny v tomto projektu. Formát vychází z [Keep a Changelog](https://keepachangelog.com/), verzování je [SemVer](https://semver.org/) (verze žije v `metaads/__init__.py`).
 
+## [2.3.0] — 2026-08-19 — Komunitní zpětná vazba: url_tags, enhancementy, velká videa 🤝
+
+První verze postavená na komunitních GitHub issues — díky **Honzovi Kašemu** (@HonzaKase) za issues #1, #2 a #3 včetně živě ověřených poznatků z produkce.
+
+### Opraveno
+- **`creative-clone` tiše ztrácel `url_tags`** (#1): UTM parametry vč. dynamických maker (`{{ad.name}}` apod.) jsou top-level pole kreativy — klon je nečetl ani neposílal, a protože kreativa bez `url_tags` je validní, dry-run ztrátu nechytil (s `--swap-on-ad` se rovnou přepnula živá reklama na kreativu bez měření). Klon je nově přenáší ze zdroje automaticky; `--url-tags` je přepíše. Stejná mezera opravena i v receptu bundlovaného skillu (`meta-creative-editing.md`).
+- **Velká videa padala na HTTP 413 s nic neříkající hláškou** (#3): jeden multipart POST na `/advideos` má limit velikosti (pozorováno 413 na 234 MB, prázdné body → „Non-JSON response"). `video-upload` nad 100 MB automaticky přepíná na resumable **chunked upload** (`upload_phase` start/transfer/finish, hranice chunků řídí server; `--chunked` vynutí i pro menší soubory). Transfer chunky jsou offset-adresované (idempotentní), takže jako jediný zápis v CLI smí retryovat transient chyby. HTTP 413 má nově srozumitelnou hlášku.
+- **Tiše neúplná insights čísla** (#3): `insights` varuje na stderr, když API vrací `paging.next` (další řádky nad `--limit`); `insights-report` varuje při dosažení stropu 5000 řádků. `--json` stdout zůstává čisté pole řádků.
+
+### Přidáno
+- **`--no-enhancements`** na `creative-create`, `creative-from-post`, `creative-from-ig` a `creative-clone` (#2): pošle `degrees_of_freedom_spec` se všemi **14 user-facing Advantage+ enhancementy** na `enroll_status: OPT_OUT` (touchupy, přepisy textů, generovaná pozadí, CTA úpravy, …). Bez něj nové kreativy vznikají s defaultním chováním Mety (enhancementy typicky zapnuté) — u klientských účtů se tak do reklam dostávaly úpravy, které nikdo neschválil. Featury neaplikovatelné na daný typ kreativy server sám vyhodí, plný seznam je proto bezpečný pro všechny typy. U klonu `--no-enhancements` nahradí spec zdroje; default zůstává „zachovej zdrojový spec".
+- `docs/api-notes.md`: seznam 14 enhancement featur; `url_tags` jako top-level pole; chunked upload protokol; **PBIA nuance k error 1772103** — FLEX kreativa (asset_feed_spec bez customization rules) s page-only identitou projde bez IG účtu, když payload obsahuje `degrees_of_freedom_spec` (komunitně ověřeno živě).
+
+### Testy
+- Suite rozšířena ze 45 na **64 testů**: přenos/override/vynechání `url_tags` u klonu, 14-featurový OPT_OUT set (a že neobsahuje deprecated pole), chunked vs. single-request cesta uploadu vč. offset-adresovaných chunků a retry opt-inu, insights varování při ořezu.
+
+### V plánu (issue #3 zůstává otevřené)
+- FLEX kreativa od nuly (`creative-create --type flex` s více texty), lead-gen na úrovni kreativy (`lead_gen_form_id` + povinný link).
+
 ## [2.2.0] — 2026-08-13 — Bezpečnostní hardening před zveřejněním 🛡️
 
 Zapracování kompletního bezpečnostního a API auditu před otevřením repa veřejnosti a studentům AI First.

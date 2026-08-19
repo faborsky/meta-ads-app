@@ -1,6 +1,6 @@
 # Meta Ads App — CLI for the Meta Marketing API
 
-Python CLI for Facebook & Instagram ads via Marketing API **v25.0**. Version 2.2.0, 47 commands. Czech user docs in [README.md](README.md).
+Python CLI for Facebook & Instagram ads via Marketing API **v25.0**. Version 2.3.0, 47 commands. Czech user docs in [README.md](README.md).
 
 ## Setup
 
@@ -50,6 +50,8 @@ Full flags: README.md command tables, or `--help` per command.
 - **DELETE is permanent; ARCHIVED is the trash can.** Deleted objects stay readable by ID (stats 28 days) and linger in edges — the CLI filters them.
 - **Ad review is asynchronous** (typically <24 h). Creative/targeting changes trigger re-review; budget/bid/schedule changes don't. Check with `ad-review` after creating/swapping creatives. Paused ads stay paused after review.
 - **Creatives are immutable** — "editing" = create new creative + swap on ad (`ad-update --creative-id` or `creative-clone --swap-on-ad`).
+- **New creatives get Advantage+ enhancements by default** (no `degrees_of_freedom_spec` = Meta's defaults, typically ON). `--no-enhancements` on creative-create/from-post/from-ig/clone sends all 14 features as OPT_OUT. `url_tags` is a top-level creative field — `creative-clone` carries it since 2.3.0; any manual rebuild must too.
+- **Videos > 100 MB upload chunked automatically** (single multipart POST 413s on large files); `--chunked` forces it. Chunk transfers are the only writes allowed to retry transient errors (offset-addressed = idempotent).
 - **Rate limits are hourly BUC windows** (Limited access tier: 300 + 40×active ads calls/h; Full access: 100k + 40×active ads). Usage only via response headers; CLI persists it in `.usage/` and hard-stops ≥95 % per account. Don't parallel-fan-out API calls.
 - **Transient errors on writes are NOT retried** (the write may have landed — retrying could duplicate objects); the CLI says so and tells you to check with the list command. Reads retry automatically.
 - **Budgets refuse zero-decimal currencies** (JPY, HUF, IDR, …) — the ×100 cents conversion would set 100× the amount. Account currency is cached in `.usage/accounts.json`.

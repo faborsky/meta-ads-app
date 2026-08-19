@@ -6,7 +6,7 @@ Load this file whenever you touch `asset_feed_spec` (Advantage+ / Dynamic Creati
 
 ## Shortcut: `creative-clone` (media / URL swaps)
 
-For the common case — swapping **video / image / landing URL** on an Advantage+ creative while preserving all texts, adlabels and `asset_customization_rules` — use the built-in command instead of manual Python. It automatically handles unique-image-hash collapsing and deprecated `degrees_of_freedom_spec` cleanup:
+For the common case — swapping **video / image / landing URL** on an Advantage+ creative while preserving all texts, `url_tags` (UTM), adlabels and `asset_customization_rules` — use the built-in command instead of manual Python. It automatically handles unique-image-hash collapsing and deprecated `degrees_of_freedom_spec` cleanup. `--url-tags` overrides the carried-over UTM parameters; `--no-enhancements` replaces the source enhancement spec with a full 14-feature OPT_OUT:
 
 ```bash
 VID=$(<META_APP_DIR>/run.sh video-upload --file new.mp4 --wait --json | jq -r .id)
@@ -28,7 +28,7 @@ sys.path.insert(0, '<META_APP_DIR>')
 import meta_ads_cli as cli
 
 original = cli._api_call('GET', '<CREATIVE_ID>', {
-    'fields': 'id,name,object_story_spec,asset_feed_spec,degrees_of_freedom_spec,status'
+    'fields': 'id,name,object_story_spec,asset_feed_spec,degrees_of_freedom_spec,url_tags,status'
 })
 
 afs = copy.deepcopy(original['asset_feed_spec'])
@@ -56,6 +56,8 @@ payload = {
     'object_story_spec': json.dumps(original['object_story_spec']),
     'asset_feed_spec': json.dumps(afs),
 }
+if original.get('url_tags'):          # top-level field — dropping it loses UTM tracking
+    payload['url_tags'] = original['url_tags']
 if dof:
     payload['degrees_of_freedom_spec'] = json.dumps(dof)
 new_creative = cli._api_call('POST', f'{cli.META_AD_ACCOUNT_ID}/adcreatives', payload)
@@ -69,6 +71,7 @@ cli._api_call('POST', '<AD_ID>', {'creative': json.dumps({'creative_id': new_cre
 - Keep ALL `adlabels` on images/videos/bodies/titles/link_urls — they connect assets to `asset_customization_rules`.
 - Keep `asset_customization_rules`, `ad_formats`, `optimization_type`, `call_to_action_types` unchanged.
 - Keep `object_story_spec` (page_id, instagram_user_id).
+- Keep **`url_tags`** — it is a TOP-LEVEL creative field (not inside the specs), so it silently disappears unless read and re-sent explicitly. A creative without `url_tags` is valid, so no dry-run catches the loss — the clone just ships without UTM.
 - Strip deprecated `degrees_of_freedom_spec` features and falsy read-only fields (see above).
 - `images[]` hashes must be UNIQUE (error_subcode 1815629) — one new image for several slots ⇒ collapse into ONE entry carrying all original adlabels. A video's `thumbnail_hash` MAY equal an image hash (uniqueness applies within `images[]` only).
 
@@ -105,7 +108,7 @@ afs = {
 ```
 
 **Gotchas (all hit in production):**
-- ⚠️ `object_story_spec` MUST include `instagram_user_id` when the catch-all rule covers IG placements, or create/swap fails with error_subcode 1772103 "Instagram account is missing". Get it: `GET /{page_id}?fields=instagram_business_account`.
+- ⚠️ `object_story_spec` MUST include `instagram_user_id` when the catch-all rule covers IG placements, or create/swap fails with error_subcode 1772103 "Instagram account is missing". Get it: `GET /{page_id}?fields=instagram_business_account`. Exception: a FLEX creative (`asset_feed_spec` WITHOUT `asset_customization_rules`) with page-only identity passes without an IG account when the payload includes a `degrees_of_freedom_spec` — Meta then uses the page-backed IG identity (PBIA).
 - Rule ordering: specific rule = priority 1, catch-all = priority 2 with an EMPTY customization_spec (age only).
 - When debugging a failing create, the real cause is in `error_user_msg` — the CLI prints it; in raw Python check `r.json()['error']['error_user_msg']`.
 

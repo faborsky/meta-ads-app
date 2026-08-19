@@ -92,6 +92,8 @@ def cmd_creative_create(args) -> None:
     params: dict = {"name": args.name}
     if args.url_tags:
         params["url_tags"] = args.url_tags
+    if args.no_enhancements:
+        params["degrees_of_freedom_spec"] = _no_enhancements_spec()
 
     creative_type = args.type
 
@@ -161,19 +163,40 @@ _DOF_DEPRECATED = [
     "image_animation", "replace_media_text", "show_destination_blurbs", "show_summary",
 ]
 
+# The 14 user-facing Advantage+ enhancement features (Meta docs: Advantage+
+# creative get-started + AdCreativeFeaturesSpec reference, v25). Features
+# ineligible for a given creative type are dropped server-side, so sending the
+# full list is safe for any type. The 'music' enhancement is NOT controlled
+# here — it lives in asset_feed_spec.audios (empty array = opted out).
+ENHANCEMENT_FEATURES = [
+    "adapt_to_placement", "add_text_overlay", "description_automation",
+    "enhance_cta", "image_background_gen", "image_templates",
+    "image_touchups", "image_uncrop", "inline_comment",
+    "product_extensions", "reveal_details_over_time", "text_optimizations",
+    "text_translation", "video_auto_crop",
+]
+
+
+def _no_enhancements_spec() -> str:
+    """degrees_of_freedom_spec JSON opting out of every Advantage+ enhancement."""
+    return json.dumps({"creative_features_spec": {
+        f: {"enroll_status": "OPT_OUT"} for f in ENHANCEMENT_FEATURES
+    }})
+
 
 def cmd_creative_clone(args) -> None:
     """Clone an existing Advantage+ creative, optionally swapping video/image/URL.
 
     Creative objects are immutable. Reads the source spec, applies swaps while
-    preserving texts, adlabels and asset_customization_rules, creates a NEW
-    creative, and optionally swaps it onto an ad (--swap-on-ad, needs --confirm).
+    preserving texts, url_tags, adlabels and asset_customization_rules, creates
+    a NEW creative, and optionally swaps it onto an ad (--swap-on-ad, needs
+    --confirm).
     """
     account_id = account_of(args)
     lint.lint_url(args.new_url)
 
     orig = api._api_call("GET", args.creative_id, {
-        "fields": "object_story_spec,asset_feed_spec,degrees_of_freedom_spec",
+        "fields": "object_story_spec,asset_feed_spec,degrees_of_freedom_spec,url_tags",
     })
     afs = copy.deepcopy(orig.get("asset_feed_spec") or {})
     if not afs:
@@ -219,7 +242,14 @@ def cmd_creative_clone(args) -> None:
         "object_story_spec": json.dumps(orig.get("object_story_spec") or {}),
         "asset_feed_spec": json.dumps(afs),
     }
-    if dof:
+    # url_tags (UTM params) are a top-level creative field — losing them here
+    # would silently ship the clone without tracking.
+    url_tags = args.url_tags or orig.get("url_tags")
+    if url_tags:
+        payload["url_tags"] = url_tags
+    if args.no_enhancements:
+        payload["degrees_of_freedom_spec"] = _no_enhancements_spec()
+    elif dof:
         payload["degrees_of_freedom_spec"] = json.dumps(dof)
 
     data, executed = api.mutate(f"{account_id}/adcreatives", payload, args.confirm)
@@ -259,6 +289,8 @@ def cmd_creative_from_post(args) -> None:
         post_id = f"{page_id}_{post_id}"
 
     params: dict = {"name": args.name, "object_story_id": post_id}
+    if args.no_enhancements:
+        params["degrees_of_freedom_spec"] = _no_enhancements_spec()
     if args.call_to_action:
         lint.lint_cta(args.call_to_action)
         lint.lint_url(args.link)
@@ -328,6 +360,8 @@ def cmd_creative_from_ig(args) -> None:
         "instagram_user_id": ig_user_id,
         "source_instagram_media_id": args.media_id,
     }
+    if args.no_enhancements:
+        params["degrees_of_freedom_spec"] = _no_enhancements_spec()
     if args.call_to_action:
         lint.lint_cta(args.call_to_action)
         lint.lint_url(args.link)
