@@ -247,9 +247,11 @@ def cmd_audiences(args) -> None:
     for r in rows:
         low = r.get("approximate_count_lower_bound")
         high = r.get("approximate_count_upper_bound")
-        # Meta returns -1 / absent while an audience is still building.
+        # Meta returns -1 both while an audience builds AND for audiences whose
+        # size it does not expose (lookalikes) — the two are indistinguishable,
+        # so stay neutral and let the status column carry the real state.
         if low is None or int(low) < 0:
-            size = "building…"
+            size = "n/a"
         elif high is not None and int(high) != int(low):
             size = f"{int(low):,}–{int(high):,}"
         else:
