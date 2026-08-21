@@ -131,3 +131,12 @@ PAUSED sandbox na reálném účtu: campaign → adset → image → creative �
 - **BUC hlavičky vracejí i page/messaging use-casy** (klíč = page/IG ID) — pro guard jsou irelevantní, CLI filtruje jen `ads_*` typy.
 - **Error 190 subcode 460** (session invalidated změnou hesla) zabije token okamžitě — `token-extend` nepomůže, nutný nový token z Exploreru.
 - Netestováno individuálně: `adset-duplicate`/`ad-duplicate` (sdílejí ověřenou `/copies` mechaniku s `campaign-duplicate`), `creative-clone` a `video-upload` (živě ověřené v produkci 2026-06). `creative-from-post`/`creative-from-ig` ověřeny do úrovně validace (plný create blokovala dostupnost postu / IG consent stav, ne kód).
+
+## Custom audiences
+
+- **Hashování je na nás.** `POST /<audience_id>/users` přijímá jen SHA256 (hex, lowercase) — jiný algoritmus Meta nepodporuje. UI Ads Manageru hashuje po nahrání samo, API ne; poslat syrová data znamená únik osobních údajů. Normalizace před hashem: e-mail trim + lowercase, telefon jen číslice bez vodicí nuly a s předvolbou země.
+- **Schema klíče jsou typy polí, ne algoritmy**: platné jsou `EMAIL`, `PHONE`, `FN`, `LN`, `ZIP`, `EXTERN_ID`, … — **`EMAIL_SHA256`/`PHONE_SHA256` nejsou platné klíče** (starší tvar z některých příkladů v docs). Multi-key se posílá jako pole: `{"schema": ["EMAIL","PHONE"], "data": [[hash, hash], …]}`; chybějící hodnota je `""`.
+- `customer_file_source` je u `subtype=CUSTOM` povinný (`USER_PROVIDED_ONLY` / `PARTNER_PROVIDED_ONLY` / `BOTH_USER_AND_PARTNER_PROVIDED`).
+- **Website audience**: pixel se uvádí uvnitř `rule.inclusions.rules[].event_sources`, ne jako top-level `pixel_id`. Event filtr je `{"field":"event","operator":"eq","value":"Purchase"}`. `retention_seconds` má být ≤ `retention_days` (max 365 dní).
+- Dávka `/users` max 10 000 záznamů; víc dávek se drží pohromadě přes `session_id` + `batch_seq`, poslední má `last_batch_flag: true`.
+- Audience pod ~1000 spárovaných uživatelů nedoručuje; velikost je po vytvoření chvíli `-1` (staví se).

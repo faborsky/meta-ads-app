@@ -194,6 +194,28 @@ CLI parsuje limitové hlavičky po každém callu, persistuje usage do `.usage/`
 | `pixels` | Pixely/datasety účtu (last_fired_time) |
 | `custom-conversions` | Custom konverze vč. policy příznaků |
 
+### Custom audiences
+
+| Příkaz | Popis |
+|---|---|
+| `audiences` | Seznam custom audiences (velikost, subtype, retence) |
+| `audience-create-website` | Website Custom Audience z pixel eventů (`--event`, `--exclude-event`, `--url-contains`, `--days`) |
+| `audience-create-customerlist` | Customer List z CSV — e-maily/telefony se **hashují SHA256 lokálně** |
+
+```bash
+# retargeting: rozdělaný checkout bez nákupu, 30 dní
+./run.sh audience-create-website --name "ICO bez nakupu 30d" \
+  --event InitiateCheckout --exclude-event Purchase --days 30   # dry-run
+```
+
+```bash
+# zákaznický seznam z CSV (sloupec email a/nebo phone)
+./run.sh audience-create-customerlist --name "Zakaznici 2026" \
+  --csv ./zakaznici.csv --country-code 420                      # dry-run
+```
+
+> **Pozor na rozdíl proti Ads Manageru:** při ručním nahrání v UI hashuje data Meta na své straně. Přes API se odesílají **už zahashovaná** — CLI normalizuje (trim + lowercase u e-mailu, jen číslice bez vodicí nuly a s předvolbou u telefonu) a hashuje SHA256 **lokálně**; syrová osobní data nikdy neopustí tvůj stroj. Dry-run ukáže počty a pár vzorků v maskované podobě i s hashem. Hlídáno testy v `tests/test_audiences.py`.
+
 ### Targeting search
 
 | Příkaz | Popis |

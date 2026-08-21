@@ -2,6 +2,17 @@
 
 Všechny podstatné změny v tomto projektu. Formát vychází z [Keep a Changelog](https://keepachangelog.com/), verzování je [SemVer](https://semver.org/) (verze žije v `metaads/__init__.py`).
 
+## [Unreleased] — custom audiences 🎯
+
+### Přidáno
+- **`audiences`** — seznam custom audiences (read-only): velikost (i „building…“ dokud se audience plní), subtype, retence, delivery status.
+- **`audience-create-website`** — Website Custom Audience z pixel eventů přes flexible rule spec (`inclusions`/`exclusions`, `event_sources`, `retention_seconds`). Typický retargeting `--event InitiateCheckout --exclude-event Purchase --days 30`. Pixel se autodetekuje, pokud má účet právě jeden.
+- **`audience-create-customerlist`** — Customer List (`subtype=CUSTOM`) z CSV. Normalizace dle Meta pravidel (e-mail: trim + lowercase; telefon: jen číslice, bez vodicí nuly, s předvolbou přes `--country-code`) a **SHA256 hashování lokálně** v `build_users_payload()` — jediné místo, kde se hashuje. Upload po dávkách 10 000 se `session_id`/`batch_seq`/`last_batch_flag`.
+- Obojí drží stejný kontrakt jako zbytek CLI: bez `--confirm` jen dry-run. U customer listu dry-run vypíše počty (načteno / k nahrání / přeskočeno) a pár vzorků **maskovaně** + prefix hashe, aby šlo normalizaci zkontrolovat okem bez vypsání seznamu.
+
+### Testy
+23 nových testů v `tests/test_audiences.py` (celkem 101). Kritické: žádná syrová osobní data v payloadu, každá hodnota je SHA256 hex, chybějící hodnota je `""` a ne hash prázdného řetězce, dry-run nesmí sáhnout na API, referenční digest z Meta dokumentace.
+
 ## [2.4.0] — 2026-08-19 — FLEX kreativa od nuly + lead ads 🧩
 
 Dokončení issue #3 od **Honzy Kašeho** — zbývající dva náměty z produkce.
