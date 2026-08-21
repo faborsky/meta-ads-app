@@ -247,6 +247,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--start-time")
     sp.add_argument("--end-time")
     sp.add_argument("--status", default="PAUSED", choices=STATUS_CHOICES)
+    sp.add_argument("--dynamic-creative", action="store_true",
+                    help="Flag ad set as Dynamic Creative (required for --type flex; max 1 ad)")
     sp.add_argument("--promoted-object", help="JSON promoted object spec (pixel_id + custom_event_type,...)")
     sp.add_argument("--dsa-payor", help="EU DSA: who pays for the ad")
     sp.add_argument("--dsa-beneficiary", help="EU DSA: who benefits from the ad")
@@ -273,6 +275,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--end-time")
     sp.add_argument("--dsa-payor")
     sp.add_argument("--dsa-beneficiary")
+    sp.add_argument("--pixel-id", help="Conversion pixel on promoted_object (merged, not replaced)")
+    sp.add_argument("--custom-event-type", help="e.g. PURCHASE, ADD_TO_CART, LEAD")
 
     sp = _cmd(sub, "adset-duplicate", cmd_adset_duplicate, "Duplicate an ad set (PAUSED copy)", write=True)
     sp.add_argument("--adset-id", required=True)

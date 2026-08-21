@@ -13,7 +13,7 @@ from metaads.commands.common import (
     parse_json_arg,
     status_filter_param,
 )
-from metaads.formatting import _budget_to_cents, _die, _format_budget, _output_json, _truncate
+from metaads.formatting import _budget_to_cents, _die, _err, _format_budget, _output_json, _truncate
 
 OPTIMIZATION_GOALS = [
     "REACH", "IMPRESSIONS", "LINK_CLICKS", "LANDING_PAGE_VIEWS",
@@ -248,6 +248,11 @@ def cmd_adset_create(args) -> None:
     if args.dsa_beneficiary:
         params["dsa_beneficiary"] = args.dsa_beneficiary
 
+    # Dynamic Creative (flex) ads can only live in an ad set flagged as such,
+    # and Meta then allows exactly one ad in it.
+    if getattr(args, "dynamic_creative", False):
+        params["is_dynamic_creative"] = "true"
+
     data, executed = api.mutate(f"{account_id}/adsets", params, args.confirm)
 
     if args.json:
@@ -296,6 +301,21 @@ def cmd_adset_update(args) -> None:
     elif has_targeting_flags:
         current = api._api_call("GET", str(args.adset_id), {"fields": "targeting"}).get("targeting", {})
         params["targeting"] = json.dumps(build_targeting(args, current))
+
+    # Conversion pixel: read-merge-write so sibling keys on promoted_object
+    # (smart_pse_enabled, application_id…) survive the update.
+    if getattr(args, "pixel_id", None) or getattr(args, "custom_event_type", None):
+        current = api._api_call("GET", str(args.adset_id),
+                                {"fields": "promoted_object"}).get("promoted_object", {})
+        promoted = dict(current)
+        if getattr(args, "pixel_id", None):
+            promoted["pixel_id"] = str(args.pixel_id)
+        if getattr(args, "custom_event_type", None):
+            promoted["custom_event_type"] = args.custom_event_type
+        if promoted != current:
+            params["promoted_object"] = json.dumps(promoted)
+            _err(f"Note: promoted_object {current} → {promoted}. Changing the pixel or "
+                 f"event resets this ad set's learning phase.")
 
     if not params:
         _die("ERROR: No fields to update.")

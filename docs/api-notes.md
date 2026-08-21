@@ -140,3 +140,11 @@ PAUSED sandbox na reálném účtu: campaign → adset → image → creative �
 - **Website audience**: pixel se uvádí uvnitř `rule.inclusions.rules[].event_sources`, ne jako top-level `pixel_id`. Event filtr je `{"field":"event","operator":"eq","value":"Purchase"}`. `retention_seconds` má být ≤ `retention_days` (max 365 dní).
 - Dávka `/users` max 10 000 záznamů; víc dávek se drží pohromadě přes `session_id` + `batch_seq`, poslední má `last_batch_flag: true`.
 - Audience pod ~1000 spárovaných uživatelů nedoručuje; velikost je po vytvoření chvíli `-1` (staví se).
+
+## Dynamic Creative (flex) a placementy — ověřeno živě 2026-08-21
+
+- **FLEX kreativu lze přiřadit JEN do ad setu s `is_dynamic_creative: true`** — jinak `Cannot Create Dynamic Creative ad In Non-Dynamic Creative Ad Set`. Flag jde nastavit pouze při vytvoření ad setu (`adset-create --dynamic-creative`), ne dodatečně. V takovém ad setu Meta povolí právě jednu reklamu.
+- Pokus vložit flex do běžného ad setu, kde už reklamy jsou, vrátí zavádějící `Cannot have more than one ad in given Dynamic Creative Ad Set` — skutečná příčina je chybějící flag, ne počet reklam.
+- **`explore` a `explore_home` v `instagram_positions` jsou deprecated** (`IG Explore Placement Is Deprecated`) — u starších ad setů zůstávají, nové je nesmí obsahovat. Funkční feed sada: `stream,profile_feed,ig_search`.
+- **`targeting_automation.advantage_audience` je při create povinný** (`Advantage Audience Flag Required`) — vždy 0 nebo 1.
+- **Piksel na publikovaném ad setu nejde změnit vůbec** (`Can't Make Edits to Published Ad Set`) — ani po vypnutí ad-set budget sharingu; jediná cesta je nový ad set. Pozn.: přepnutí sdílení rozpočtu má cooldown 2 h.
