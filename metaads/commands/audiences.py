@@ -292,9 +292,11 @@ def cmd_audience_create_website(args) -> None:
         exclude_event=args.exclude_event,
     )
 
+    # No `subtype` here: Meta dropped it for rule-based audiences ("The parameter
+    # 'subtype' is not supported in the current API version") — the rule itself
+    # defines the audience type. Customer lists still require subtype=CUSTOM.
     params = {
         "name": args.name,
-        "subtype": "WEBSITE",
         "retention_days": args.days,
         "prefill": "true" if args.prefill else "false",
         "rule": json.dumps(rule),
@@ -302,7 +304,7 @@ def cmd_audience_create_website(args) -> None:
     if args.description:
         params["description"] = args.description
 
-    plan = {"account_id": account_id, "name": args.name, "subtype": "WEBSITE",
+    plan = {"account_id": account_id, "name": args.name, "type": "website (rule-based)",
             "pixel_id": str(pixel_id), "retention_days": args.days,
             "prefill": bool(args.prefill), "rule": rule}
 

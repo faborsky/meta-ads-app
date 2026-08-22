@@ -272,3 +272,20 @@ def test_website_days_out_of_range_dies_before_api(monkeypatch, capsys):
             event="Purchase", exclude_event=None, url_contains=None,
             days=400, prefill=1, description=None, confirm=False, json=False))
     assert "--days must be between 1 and 365" in capsys.readouterr().err
+
+
+def test_website_create_sends_no_subtype(monkeypatch, capsys):
+    """Meta rejects `subtype` on rule-based audiences since v25 — never send it."""
+    seen = {}
+
+    def fake_api(method, endpoint, params=None, **kw):
+        seen.update(params or {})
+        return {"id": "AUD1"}
+
+    monkeypatch.setattr(api, "_api_call", fake_api)
+    cmd_audience_create_website(Namespace(
+        account_id="act_1000000", name="X", pixel_id="PIX1", event="Purchase",
+        exclude_event=None, url_contains=None, days=180, prefill=1,
+        description=None, confirm=True, json=False))
+    assert "subtype" not in seen
+    assert "rule" in seen and seen["retention_days"] == 180
