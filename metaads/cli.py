@@ -31,6 +31,12 @@ from metaads.commands.adsets import (
     cmd_adset_update,
     cmd_adsets,
 )
+from metaads.commands.audiences import (
+    CUSTOMER_FILE_SOURCES,
+    cmd_audience_create_customerlist,
+    cmd_audience_create_website,
+    cmd_audiences,
+)
 from metaads.commands.auth import cmd_token_extend, cmd_token_info
 from metaads.commands.campaigns import (
     OBJECTIVES,
@@ -241,6 +247,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--start-time")
     sp.add_argument("--end-time")
     sp.add_argument("--status", default="PAUSED", choices=STATUS_CHOICES)
+    sp.add_argument("--dynamic-creative", action="store_true",
+                    help="Flag ad set as Dynamic Creative (required for --type flex; max 1 ad)")
     sp.add_argument("--promoted-object", help="JSON promoted object spec (pixel_id + custom_event_type,...)")
     sp.add_argument("--dsa-payor", help="EU DSA: who pays for the ad")
     sp.add_argument("--dsa-beneficiary", help="EU DSA: who benefits from the ad")
@@ -267,6 +275,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--end-time")
     sp.add_argument("--dsa-payor")
     sp.add_argument("--dsa-beneficiary")
+    sp.add_argument("--pixel-id", help="Conversion pixel on promoted_object (merged, not replaced)")
+    sp.add_argument("--custom-event-type", help="e.g. PURCHASE, ADD_TO_CART, LEAD")
 
     sp = _cmd(sub, "adset-duplicate", cmd_adset_duplicate, "Duplicate an ad set (PAUSED copy)", write=True)
     sp.add_argument("--adset-id", required=True)
@@ -435,6 +445,34 @@ def build_parser() -> argparse.ArgumentParser:
     _cmd(sub, "pixels", cmd_pixels, "List account pixels/datasets (read-only)")
     sp = _cmd(sub, "custom-conversions", cmd_custom_conversions, "List custom conversions (read-only)")
     sp.add_argument("--limit", type=int, default=100)
+
+    # ----- Custom audiences -----------------------------------------------
+    sp = _cmd(sub, "audiences", cmd_audiences, "List custom audiences (read-only)")
+    sp.add_argument("--limit", type=int, default=100)
+
+    sp = _cmd(sub, "audience-create-website", cmd_audience_create_website,
+              "Website Custom Audience from pixel events", write=True)
+    sp.add_argument("--name", required=True, help="Audience name")
+    sp.add_argument("--pixel-id", help="Pixel ID (auto-detected if the account has exactly one)")
+    sp.add_argument("--event", help="Standard event to include, e.g. InitiateCheckout")
+    sp.add_argument("--exclude-event", help="Standard event to exclude, e.g. Purchase")
+    sp.add_argument("--url-contains", help="Extra inclusion filter on URL (i_contains)")
+    sp.add_argument("--days", type=int, default=30, help="Retention 1-365 (default 30)")
+    sp.add_argument("--prefill", type=int, choices=[0, 1], default=1,
+                    help="Include activity from before creation (default 1)")
+    sp.add_argument("--description")
+
+    sp = _cmd(sub, "audience-create-customerlist", cmd_audience_create_customerlist,
+              "Customer List audience from CSV (SHA256-hashed locally)", write=True)
+    sp.add_argument("--name", required=True, help="Audience name")
+    sp.add_argument("--csv", required=True, help="CSV with an email and/or phone column")
+    sp.add_argument("--country-code", help="Digits prepended to local numbers, e.g. 380")
+    sp.add_argument("--customer-file-source", default="USER_PROVIDED_ONLY",
+                    choices=CUSTOMER_FILE_SOURCES,
+                    help="Where the data came from (default USER_PROVIDED_ONLY)")
+    sp.add_argument("--preview", type=int, default=3,
+                    help="How many hashed sample rows to show in dry-run (default 3)")
+    sp.add_argument("--description")
 
     # ----- Targeting search -----------------------------------------------
     sp = _cmd(sub, "interest-search", cmd_interest_search, "Search detailed-targeting interests")

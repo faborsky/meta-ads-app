@@ -19,7 +19,7 @@ If `<META_APP_DIR>` is still literally in this file, STOP and ask the user for t
 
 Command reference: `<META_APP_DIR>/README.md` (full flag tables) and `<META_APP_DIR>/docs/api-notes.md` (API behavior & quirks). Read them when unsure — this skill deliberately does not duplicate flags.
 
-### Command map (47 commands, grouped)
+### Command map (50 commands, grouped)
 
 - **Account & token**: account, pages, api-limits, token-info, token-extend
 - **Campaigns**: campaigns, campaign-detail, campaign-create, campaign-update, campaign-duplicate, campaign-delete, budget-schedule
@@ -28,6 +28,7 @@ Command reference: `<META_APP_DIR>/README.md` (full flag tables) and `<META_APP_
 - **Creatives & media**: creatives, creative-detail, creative-create, creative-clone, creative-from-post, creative-from-ig, ig-media, preview, creative-delete, image-upload, video-upload
 - **Insights**: insights, insights-report, pulse, activities
 - **Conversions (read)**: pixels, custom-conversions
+- **Custom audiences**: audiences, audience-create-website, audience-create-customerlist
 - **Targeting search**: interest-search, interest-suggest, interest-validate, geo-search, locale-search
 
 ## SAFETY RULES (non-negotiable)
@@ -39,7 +40,8 @@ Command reference: `<META_APP_DIR>/README.md` (full flag tables) and `<META_APP_
 5. **Currency awareness.** Amounts are in the ACCOUNT currency, which may not be the user's home currency — check `account` first and label every money number with its currency.
 6. **Review is asynchronous.** After creating/swapping creatives, check `ad-review` (typically <24 h). A creative swap always triggers re-review.
 7. **Respect rate limits.** No parallel API fan-outs; the CLI throttles and hard-stops itself — if it does, wait, don't override.
-8. **Token care.** If any command warns about token expiry, run `token-extend --write-env` before continuing.
+8. **Customer lists are personal data.** `audience-create-customerlist` hashes email/phone SHA256 locally before upload (the API, unlike the Ads Manager UI, does NOT hash for you). Never print raw rows from the CSV into the chat, never pass identifiers on the command line — point at the file and let the dry-run show masked samples. Confirm the source CSV and its consent basis with the user before `--confirm`.
+9. **Token care.** If any command warns about token expiry, run `token-extend --write-env` before continuing.
 
 ## Parse $ARGUMENTS
 

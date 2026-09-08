@@ -131,3 +131,20 @@ PAUSED sandbox na reálném účtu: campaign → adset → image → creative �
 - **BUC hlavičky vracejí i page/messaging use-casy** (klíč = page/IG ID) — pro guard jsou irelevantní, CLI filtruje jen `ads_*` typy.
 - **Error 190 subcode 460** (session invalidated změnou hesla) zabije token okamžitě — `token-extend` nepomůže, nutný nový token z Exploreru.
 - Netestováno individuálně: `adset-duplicate`/`ad-duplicate` (sdílejí ověřenou `/copies` mechaniku s `campaign-duplicate`), `creative-clone` a `video-upload` (živě ověřené v produkci 2026-06). `creative-from-post`/`creative-from-ig` ověřeny do úrovně validace (plný create blokovala dostupnost postu / IG consent stav, ne kód).
+
+## Custom audiences
+
+- **Hashování je na nás.** `POST /<audience_id>/users` přijímá jen SHA256 (hex, lowercase) — jiný algoritmus Meta nepodporuje. UI Ads Manageru hashuje po nahrání samo, API ne; poslat syrová data znamená únik osobních údajů. Normalizace před hashem: e-mail trim + lowercase, telefon jen číslice bez vodicí nuly a s předvolbou země.
+- **Schema klíče jsou typy polí, ne algoritmy**: platné jsou `EMAIL`, `PHONE`, `FN`, `LN`, `ZIP`, `EXTERN_ID`, … — **`EMAIL_SHA256`/`PHONE_SHA256` nejsou platné klíče** (starší tvar z některých příkladů v docs). Multi-key se posílá jako pole: `{"schema": ["EMAIL","PHONE"], "data": [[hash, hash], …]}`; chybějící hodnota je `""`.
+- `customer_file_source` je u `subtype=CUSTOM` povinný (`USER_PROVIDED_ONLY` / `PARTNER_PROVIDED_ONLY` / `BOTH_USER_AND_PARTNER_PROVIDED`).
+- **Website audience**: pixel se uvádí uvnitř `rule.inclusions.rules[].event_sources`, ne jako top-level `pixel_id`. Event filtr je `{"field":"event","operator":"eq","value":"Purchase"}`. `retention_seconds` má být ≤ `retention_days` (max 365 dní).
+- Dávka `/users` max 10 000 záznamů; víc dávek se drží pohromadě přes `session_id` + `batch_seq`, poslední má `last_batch_flag: true`.
+- Audience pod ~1000 spárovaných uživatelů nedoručuje; velikost je po vytvoření chvíli `-1` (staví se).
+
+## Dynamic Creative (flex) a placementy — ověřeno živě 2026-08-21
+
+- **FLEX kreativu lze přiřadit JEN do ad setu s `is_dynamic_creative: true`** — jinak `Cannot Create Dynamic Creative ad In Non-Dynamic Creative Ad Set`. Flag jde nastavit pouze při vytvoření ad setu (`adset-create --dynamic-creative`), ne dodatečně. V takovém ad setu Meta povolí právě jednu reklamu.
+- Pokus vložit flex do běžného ad setu, kde už reklamy jsou, vrátí zavádějící `Cannot have more than one ad in given Dynamic Creative Ad Set` — skutečná příčina je chybějící flag, ne počet reklam.
+- **`explore` a `explore_home` v `instagram_positions` jsou deprecated** (`IG Explore Placement Is Deprecated`) — u starších ad setů zůstávají, nové je nesmí obsahovat. Funkční feed sada: `stream,profile_feed,ig_search`.
+- **`targeting_automation.advantage_audience` je při create povinný** (`Advantage Audience Flag Required`) — vždy 0 nebo 1.
+- **Piksel na publikovaném ad setu nejde změnit vůbec** (`Can't Make Edits to Published Ad Set`) — ani po vypnutí ad-set budget sharingu; jediná cesta je nový ad set. Pozn.: přepnutí sdílení rozpočtu má cooldown 2 h.
